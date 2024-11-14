@@ -10,6 +10,9 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     mvFile = fopen('motion_vectors.txt', 'r');
     residualFile = fopen('residuals.txt', 'r');
     vid_reconstructed = fopen('reconstructed_vid.yuv', 'r');
+
+    MDiff_file = fopen("MDiff.txt", 'r');
+    QTC_Coeff_file = fopen("QTC_Coeff.txt", 'r');
     
     % Loop through frames
     for frameIdx = 1:nframes

@@ -1,16 +1,18 @@
-function [psnrValues, maes] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values)
+function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values)
     % Open video files
     vid_out_Y_pad = fopen('y_only_padded.yuv', 'r');
     vid_out_Y = fopen('y_only.yuv', 'r');
     vid_reconstructed = fopen('reconstructed_vid.yuv', 'w');
     predicted_vid = fopen('predicted.yuv','w');
 
-    mvFile = fopen('motion_vectors.txt', 'w');
-    residualFile = fopen('residuals.txt', 'w');
+    %mvFile = fopen('motion_vectors.txt', 'w');
+    %residualFile = fopen('residuals.txt', 'w');
+
+    MDiff_stream = fopen('MDiff.txt', 'w');
+    QTC_stream = fopen('QTC_Coeff.txt', 'w');
     
     % Store PSNR for each frame, reconstructed vs original
-    psnrValues = zeros(1, nframes); 
-    maes = zeros(1, nframes); 
+    psnrValues = zeros(1, nframes);  
 
     % initialize a reference frame for first frame
     referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8');
@@ -23,11 +25,11 @@ function [psnrValues, maes] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight,
 
         if mod(frameIdx - 1, I_period) == 0
             fprintf('Dealing with frame %d, I-Period\n', frameIdx);
-            [predictedFrame, reconstructedFrame, MDiff_stream, QTC_stream] = A1_Q4_intraPredictForIFrame(currentFrame, blockSize, QP_values); 
+            [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(currentFrame, blockSize, QP_values, MDiff_stream, QTC_stream); 
             type = 'I';
         else
             fprintf('Dealing with frame %d, F-Period\n', frameIdx);
-            [predictedFrame, reconstructedFrame, MDiff_stream, QTC_stream] = A1_Q3_interPredictPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values);
+            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream);
             type = 'P';
         end
 
@@ -61,7 +63,6 @@ function [psnrValues, maes] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight,
     fclose(vid_out_Y);
     fclose(vid_reconstructed);
     fclose(predicted_vid);
-
-    fclose(mvFile);
-    fclose(residualFile);
+    fclose(MDiff_stream);
+    fclose(QTC_stream);
 end

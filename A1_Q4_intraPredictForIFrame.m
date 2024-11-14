@@ -1,13 +1,10 @@
-function [predictedFrame, reconstructedFrame, MDiff_stream, QTC_stream] = A1_Q4_intraPredictForIFrame(original_frame, block_size, QP)
+function [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(original_frame, block_size, QP, MDiff_stream, QTC_stream)
 
     Q_Matrix = A1_Q4_generateQMatrix(block_size, QP);
 
     [h, w] = size(original_frame);
     %reconstructed_frame = zeros(h, w);
     encoded_frame = zeros(h, w);
-    MDiff_stream = '';
-    QTC_stream = '';
-
     previous_mode = 0;
 
     % Simulate processing the frame in blocks
@@ -28,7 +25,8 @@ function [predictedFrame, reconstructedFrame, MDiff_stream, QTC_stream] = A1_Q4_
 
             differential_mode = mode - previous_mode;
             previous_mode = mode;
-            MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
+            %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
+            fprintf(MDiff_stream, 'Mode: %s\n', A1_Q4_expGolombEncode(differential_mode));
  
             % get the residuals of block
             residual_block = block - predicted_block;
@@ -38,7 +36,8 @@ function [predictedFrame, reconstructedFrame, MDiff_stream, QTC_stream] = A1_Q4_
 
             scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
             rle_encoded = A1_Q4_rleEncode(scanned_coeffs);
-            QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
+            %QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
+            fprintf(QTC_stream, '%s\n', A1_Q4_expGolombEncode(rle_encoded));
 
             % decode the encoded block and add it to prediction
             decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);
