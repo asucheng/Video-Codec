@@ -37,7 +37,8 @@ function [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(orig
             scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
             rle_encoded = A1_Q4_rleEncode(scanned_coeffs, block_size);
             %QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
-            fprintf(QTC_stream, '%s\n', A1_Q4_expGolombEncode(rle_encoded));
+            encoded_value = A1_Q4_expGolombEncode(rle_encoded);
+            fprintf(QTC_stream, '%s\n', encoded_value);
 
             % decode the encoded block and add it to prediction
             decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);

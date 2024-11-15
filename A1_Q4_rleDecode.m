@@ -24,10 +24,10 @@ function decoded_coeffs = A1_Q4_rleDecode(rle_encoded, blockSize)
     end
 
     % Ensure the length matches blockSize^2 (e.g., 64 for 8x8 blocks)
-    % expectedLength = blockSize^2;
-    % if length(decoded_coeffs) < expectedLength
-    %     % Pad with zeros if necessary
-    %     decoded_coeffs = [decoded_coeffs, zeros(1, expectedLength - length(decoded_coeffs))];
-    % end
+    expectedLength = blockSize^2;
+    if length(decoded_coeffs) < expectedLength
+        %Pad with zeros if necessary
+        decoded_coeffs = [decoded_coeffs, zeros(1, expectedLength - length(decoded_coeffs))];
+    end
 
 end

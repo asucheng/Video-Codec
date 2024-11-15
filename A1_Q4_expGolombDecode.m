@@ -1,5 +1,6 @@
 function decoded_values = A1_Q4_expGolombDecode(encoded_bitstream)
     % Split the bitstream by spaces to get individual encoded values
+    encoded_bitstream = strtrim(encoded_bitstream);
     encoded_values = strsplit(encoded_bitstream, ' ');
     
     % Initialize the decoded values array

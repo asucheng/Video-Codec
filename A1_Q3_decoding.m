@@ -19,6 +19,7 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     for frameIdx = 1:nframes
         % Initialize the decoded frame
         decodedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
+        reconstructed_frame = zeros(paddedHeight, paddedWidth, 'double');
         Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
         
         % Loop over blocks in raster order
@@ -53,6 +54,21 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     
                     % Extract the predictor block from the reference frame
                     predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
+
+                    % handle QTC file------------------------------------------
+                    % residualBlock_de = A1_Q3_readResidualFile(QTC_Coeff_file, blockSize);
+                    QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
+                    encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
+                    coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
+                    residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, blockSize, blockSize);
+                    residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
+                    
+                    % Add the residual block to the predictor block to get the decoded block
+                    decodedBlock = double(predictorBlock) + double(residualBlock_de);
+                    decodedBlock = max(min(decodedBlock, 255), 0);
+                    
+                    % Place the decoded block into the decoded frame
+                    decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = decodedBlock;
                 else
                     % decode I frame
                     block_height = min(blockSize, paddedHeight - row + 1);
@@ -62,33 +78,34 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                         if row == 1
                             horizontal_pred = 128 * ones(block_height, block_width);
                         else
-                            horizontal_pred = repmat(referenceFrame_de(row-1, col:col+block_width-1), block_height, 1);
+                            horizontal_pred = repmat(reconstructed_frame(row-1, col:col+block_width-1), block_height, 1);
                         end
                         predictorBlock = horizontal_pred;
                     else
                         if col == 1
                             vertical_pred = 128 * ones(block_height, block_width);
                         else
-                            vertical_pred = repmat(referenceFrame_de(row:row+block_height-1, col-1), 1, block_width);
+                            vertical_pred = repmat(reconstructed_frame(row:row+block_height-1, col-1), 1, block_width);
                         end
                         predictorBlock = vertical_pred;
                     end
-                end
 
-                % handle QTC file------------------------------------------
-                % residualBlock_de = A1_Q3_readResidualFile(QTC_Coeff_file, blockSize);
-                QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
-                encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
-                coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
-                residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, blockSize, blockSize);
-                residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
-                
-                % Add the residual block to the predictor block to get the decoded block
-                decodedBlock = double(predictorBlock) + double(residualBlock_de);
-                decodedBlock = max(min(decodedBlock, 255), 0);
-                
-                % Place the decoded block into the decoded frame
-                decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = decodedBlock;
+                    % handle QTC file------------------------------------------
+                    % residualBlock_de = A1_Q3_readResidualFile(QTC_Coeff_file, blockSize);
+                    QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
+                    encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
+                    coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
+                    residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, blockSize, blockSize);
+                    residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
+                    
+                    % Add the residual block to the predictor block to get the decoded block
+                    reconstructed_block = double(predictorBlock) + double(residualBlock_de);
+                    reconstructed_block = max(min(reconstructed_block, 255), 0);
+                    
+                    % Place the decoded block into the decoded frame
+                    reconstructed_frame(row:row+blockSize-1, col:col+blockSize-1) = reconstructed_block;
+                    decodedFrame = reconstructed_frame;
+                end
             end
         end
 
