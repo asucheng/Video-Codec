@@ -4,7 +4,6 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     
     % Initialize the hypothetical reference frame for the first frame (all values = 128)
     referenceFrame_de = 128 * ones(paddedHeight, paddedWidth, 'uint8');
-    previous_mv  = [0, 0];
     
     % Open the necessary files
     vid_decoded = fopen('decoded_vid.yuv', 'w');
@@ -19,8 +18,10 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     for frameIdx = 1:nframes
         % Initialize the decoded frame
         decodedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
-        reconstructed_frame = zeros(paddedHeight, paddedWidth, 'double');
         Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
+
+        previous_mv = [0, 0];
+        previous_mode = 0;
         
         % Loop over blocks in raster order
         for row = 1:blockSize:paddedHeight
@@ -44,8 +45,6 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     % Use the motion vector to get the predictor block from the reference frame
                     refRow = row + bestMatch(2); %row + yOffset; 
                     refCol = col + bestMatch(1); %col + xOffset;
-                    
-                    % [refRow, refCol] = A1_Q3_readMVandSelectBlock(MDiff_file, row, col);
                     
                     % Check for boundary in reference frame
                     if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
@@ -73,25 +72,28 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     % decode I frame
                     block_height = min(blockSize, paddedHeight - row + 1);
                     block_width = min(blockSize, paddedWidth - col + 1);
-                    mode = MDiff_line_array(2);
+                    diff_mode = MDiff_line_array(2);
+
+                    mode = diff_mode + previous_mode;
+                    previous_mode = mode;
+
                     if mode == 0
                         if row == 1
                             horizontal_pred = 128 * ones(block_height, block_width);
                         else
-                            horizontal_pred = repmat(reconstructed_frame(row-1, col:col+block_width-1), block_height, 1);
+                            horizontal_pred = repmat(decodedFrame(row-1, col:col+block_width-1), block_height, 1);
                         end
                         predictorBlock = horizontal_pred;
                     else
                         if col == 1
                             vertical_pred = 128 * ones(block_height, block_width);
                         else
-                            vertical_pred = repmat(reconstructed_frame(row:row+block_height-1, col-1), 1, block_width);
+                            vertical_pred = repmat(decodedFrame(row:row+block_height-1, col-1), 1, block_width);
                         end
                         predictorBlock = vertical_pred;
                     end
 
                     % handle QTC file------------------------------------------
-                    % residualBlock_de = A1_Q3_readResidualFile(QTC_Coeff_file, blockSize);
                     QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
                     encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
                     coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
@@ -103,8 +105,7 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     reconstructed_block = max(min(reconstructed_block, 255), 0);
                     
                     % Place the decoded block into the decoded frame
-                    reconstructed_frame(row:row+blockSize-1, col:col+blockSize-1) = reconstructed_block;
-                    decodedFrame = reconstructed_frame;
+                    decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructed_block;
                 end
             end
         end

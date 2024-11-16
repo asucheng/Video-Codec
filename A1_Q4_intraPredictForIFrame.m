@@ -26,7 +26,8 @@ function [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(orig
             differential_mode = mode - previous_mode;
             previous_mode = mode;
             %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
-            fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), A1_Q4_expGolombEncode(differential_mode));
+            encoded_diff = A1_Q4_expGolombEncode(differential_mode);
+            fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), encoded_diff);
  
             % get the residuals of block
             residual_block = block - predicted_block;
