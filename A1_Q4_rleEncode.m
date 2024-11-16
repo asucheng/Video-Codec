@@ -1,4 +1,4 @@
-function rle_encoded = A1_Q4_rleEncode(coeffs)
+function rle_encoded = A1_Q4_rleEncode(coeffs, blockSize)
     % Run-Length Encoding (RLE) for quantized coefficients
     rle_encoded = [];
     n = length(coeffs);
@@ -27,5 +27,11 @@ function rle_encoded = A1_Q4_rleEncode(coeffs)
         end
     end
 
-    rle_encoded = [rle_encoded, 0];
+    % Ensure padding with zeros if the encoded data does not fully cover blockSize^2
+    % remainingZeros = blockSize^2 - length(coeffs);
+    % if remainingZeros > 0
+    %     rle_encoded = [rle_encoded, remainingZeros];
+    % end
+    % 
+    % rle_encoded = [rle_encoded, 0];
 end

@@ -24,8 +24,7 @@ function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referen
             previous_mv = bestMatch;
 
             % generate MDiff with MV
-            %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2))];
-            fprintf(MDiff_stream, 'MV: (%s, %s)\n', A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)));
+            fprintf(MDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)));
         
             % Save the motion vector
             % fprintf(mvFile, 'Frame %d, Block (%d, %d): MV = (%d, %d)\n', frameIdx, row, col, bestMatch(1), bestMatch(2));
@@ -37,9 +36,10 @@ function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referen
             encoded_residual_block = A1_Q4_quantizeBlockAfterDCT(approxResidualBlock, Q_Matrix);
             % generate QTC stream
             scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
-            rle_encoded = A1_Q4_rleEncode(scanned_coeffs);
+            rle_encoded = A1_Q4_rleEncode(scanned_coeffs, blockSize);
             %QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
-            fprintf(QTC_stream, '%s\n', A1_Q4_expGolombEncode(rle_encoded));   % each line is a block
+            encoded_value = A1_Q4_expGolombEncode(rle_encoded);
+            fprintf(QTC_stream, '%s\n', encoded_value);   % each line is a block
 
             decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);
 
