@@ -1,4 +1,5 @@
-function [predictedFrame, reconstructedFrame] = A2_Q3_intraPredictForIFrame(original_frame, block_size, QP, MDiff_stream, QTC_stream)
+function [predictedFrame, reconstructedFrame] = A2_Q34_intraPredictForIFrame(original_frame, block_size, QP, ...
+    MDiff_stream, MVPDiff_stream, QTC_stream, ~, FastME)
 
     Q_Matrix = A1_Q4_generateQMatrix(block_size, QP);
 
@@ -27,7 +28,12 @@ function [predictedFrame, reconstructedFrame] = A2_Q3_intraPredictForIFrame(orig
             previous_mode = mode;
             %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
             encoded_diff = A1_Q4_expGolombEncode(differential_mode);
-            fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), encoded_diff);
+
+            if FastME
+                fprintf(MVPDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), encoded_diff);
+            else
+                fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), encoded_diff);
+            end
  
             % get the residuals of block
             residual_block = block - predicted_block;

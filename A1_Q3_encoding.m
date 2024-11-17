@@ -8,11 +8,12 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
     vid_reconstructed = fopen(strcat(filename_prefix, 'reconstructed_vid.yuv'), 'w');
     predicted_vid = fopen(strcat(filename_prefix, 'predicted.yuv'),'w');
 
-    %mvFile = fopen('motion_vectors.txt', 'w');
-    %residualFile = fopen('residuals.txt', 'w');
+    % mvFile = fopen('motion_vectors.txt', 'w');
+    % residualFile = fopen('residuals.txt', 'w');
 
     MDiff_stream = fopen(strcat(filename_prefix, 'MDiff.txt'), 'w');
     QTC_stream = fopen(strcat(filename_prefix, 'QTC_Coeff.txt'), 'w');
+    MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
     
     % Store PSNR for each frame, reconstructed vs original
     psnrValues = zeros(1, nframes);  
@@ -29,13 +30,13 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
         if mod(frameIdx - 1, I_period) == 0
             fprintf('Dealing with frame %d, I-Period\n', frameIdx);
             [predictedFrame, reconstructedFrame] = A2_Q34_intraPredictForIFrame(currentFrame, blockSize, QP_values, ...
-                MDiff_stream, QTC_stream); 
+                MDiff_stream, MVPDiff_stream, QTC_stream, FMEEnable, FastME); 
             type = 'I';
         else
             fprintf('Dealing with frame %d, P-Period\n', frameIdx);
             % FMEEnable only works for P Frame
             [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(referenceFrame, currentFrame, searchRange, ...
-                blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, ...
+                blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                 FMEEnable, FastME);
             type = 'P';
         end
