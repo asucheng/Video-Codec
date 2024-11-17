@@ -7,8 +7,6 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     
     % Open the necessary files
     vid_decoded = fopen('decoded_vid.yuv', 'w');
-    % mvFile = fopen('motion_vectors.txt', 'r');
-    % residualFile = fopen('residuals.txt', 'r');
     vid_reconstructed = fopen('reconstructed_vid.yuv', 'r');
 
     MDiff_file = fopen("MDiff.txt", 'r');
@@ -18,7 +16,8 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     for frameIdx = 1:nframes
         % Initialize the decoded frame
         decodedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
-        Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
+        lambda = A2_Q2_getLambda(QP);
+        Q_Matrix = A2_Q2_generateQMatrix(blockSize, QP);
 
         previous_mv = [0, 0];
         previous_mode = 0;
@@ -31,105 +30,95 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     continue;
                 end
                 
-                % read the a line of MDiff file----------------------------
+                % Read the split flag from MDiff_stream
                 MDiff_line = fgetl(MDiff_file);
                 MDiff_line_array = A1_Q4_expGolombDecode(MDiff_line);
 
-                if MDiff_line_array(1) == 0
-                    % decoder P frame 
-                    % update the motion vector differentiation
-                    diff_mv = MDiff_line_array(end-1:end);
-                    bestMatch = diff_mv + previous_mv;
-                    previous_mv = bestMatch;
-    
-                    % Use the motion vector to get the predictor block from the reference frame
-                    refRow = row + bestMatch(2); %row + yOffset; 
-                    refCol = col + bestMatch(1); %col + xOffset;
+                split_flag = MDiff_line_array(1);
+                
+                if split_flag == 1
+                    % Handle split blocks recursively
                     
-                    % Check for boundary in reference frame
-                    if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
-                        continue;  % Skip if the predictor block goes out of bounds
-                    end
-                    
-                    % Extract the predictor block from the reference frame
-                    predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
-
-                    % handle QTC file------------------------------------------
-                    % residualBlock_de = A1_Q3_readResidualFile(QTC_Coeff_file, blockSize);
-                    QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
-                    encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
-                    coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
-                    residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, blockSize, blockSize);
-                    residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
-                    
-                    % Add the residual block to the predictor block to get the decoded block
-                    decodedBlock = double(predictorBlock) + double(residualBlock_de);
-                    decodedBlock = max(min(decodedBlock, 255), 0);
-                    
-                    % Place the decoded block into the decoded frame
-                    decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = decodedBlock;
+                    sub_block = A2_Q2_decodeSplitBlock(referenceFrame_de, QTC_Coeff_file, MDiff_file, ...
+                        row, col, blockSize, paddedHeight, paddedWidth, QP);
+                    decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = sub_block;
                 else
-                    % decode I frame
-                    block_height = min(blockSize, paddedHeight - row + 1);
-                    block_width = min(blockSize, paddedWidth - col + 1);
-                    diff_mode = MDiff_line_array(2);
+                    % Decode non-split blocks (I or P frame)
+                    if MDiff_line_array(2) == 0
+                        % P-frame logic
+                        diff_mv = MDiff_line_array(end-1:end);
+                        bestMatch = diff_mv + previous_mv;
+                        previous_mv = bestMatch;
 
-                    mode = diff_mode + previous_mode;
-                    previous_mode = mode;
+                        % Get reference block
+                        refRow = row + bestMatch(2);
+                        refCol = col + bestMatch(1);
 
-                    if mode == 0
-                        if row == 1
-                            horizontal_pred = 128 * ones(block_height, block_width);
-                        else
-                            horizontal_pred = repmat(decodedFrame(row-1, col:col+block_width-1), block_height, 1);
+                        % Check for reference block boundary
+                        if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
+                            continue;  % Skip out-of-bound blocks
                         end
-                        predictorBlock = horizontal_pred;
+                        predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
                     else
-                        if col == 1
-                            vertical_pred = 128 * ones(block_height, block_width);
+                        % I-frame logic
+                        block_height = min(blockSize, paddedHeight - row + 1);
+                        block_width = min(blockSize, paddedWidth - col + 1);
+                        diff_mode = MDiff_line_array(2);
+                        mode = diff_mode + previous_mode;
+                        previous_mode = mode;
+
+                        if mode == 0
+                            if row == 1
+                                horizontal_pred = 128 * ones(block_height, block_width);
+                            else
+                                horizontal_pred = repmat(decodedFrame(row-1, col:col+block_width-1), block_height, 1);
+                            end
+                            predictorBlock = horizontal_pred;
                         else
-                            vertical_pred = repmat(decodedFrame(row:row+block_height-1, col-1), 1, block_width);
+                            if col == 1
+                                vertical_pred = 128 * ones(block_height, block_width);
+                            else
+                                vertical_pred = repmat(decodedFrame(row:row+block_height-1, col-1), 1, block_width);
+                            end
+                            predictorBlock = vertical_pred;
                         end
-                        predictorBlock = vertical_pred;
                     end
 
-                    % handle QTC file------------------------------------------
-                    QTC_Line = fgetl(QTC_Coeff_file);  % Read the residual block line
+                    % Handle residuals from QTC_stream
+                    QTC_Line = fgetl(QTC_Coeff_file);
                     encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
                     coeffs_scanned = A1_Q4_rleDecode(encoded_rle, blockSize);
                     residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, blockSize, blockSize);
-                    residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
+                    residualBlock_de = A2_Q2_idctAfterDequantizeBlock(residual_block_encoded, Q_Matrix);
                     
-                    % Add the residual block to the predictor block to get the decoded block
+                    % Reconstruct block
                     reconstructed_block = double(predictorBlock) + double(residualBlock_de);
                     reconstructed_block = max(min(reconstructed_block, 255), 0);
                     
-                    % Place the decoded block into the decoded frame
+                    % Place the reconstructed block
                     decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructed_block;
                 end
             end
         end
 
-        % Update the reference frame for the next iteration
+        % Update reference frame
         referenceFrame_de = decodedFrame;
         
-        % Remove padding by cropping the frame
+        % Write decoded frame to file
         unpaddedDecodeFrame = decodedFrame(1:height, 1:width);
-        % Write the decoded frame to the output file
         fwrite(vid_decoded, unpaddedDecodeFrame', 'uint8');
 
-        % Compute Mean Squared Error (MSE)
+        % Compute PSNR
         reconstructedFrame_comp = fread(vid_reconstructed, [width, height], 'uint8')';
         mse = mean((double(reconstructedFrame_comp(:)) - double(unpaddedDecodeFrame(:))).^2);
-        % Compute PSNR
         if mse == 0
-            psnrValues_verify(frameIdx) = Inf;  % Perfect reconstruction
+            psnrValues_verify(frameIdx) = Inf;
         else
             psnrValues_verify(frameIdx) = 10 * log10(255^2 / mse);
         end
     end
-    
-    % Close the files
+
+    % Close files
     fclose(vid_decoded);
     fclose(vid_reconstructed);
 end

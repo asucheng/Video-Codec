@@ -1,4 +1,4 @@
-function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP, MDiff_stream, QTC_stream)
+function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP, MDiff_stream, QTC_stream, VBSenable)
     Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
     previous_mv = [0, 0];
 
