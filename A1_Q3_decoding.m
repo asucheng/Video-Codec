@@ -1,4 +1,6 @@
-function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, paddedHeight, height, width, QP)    
+function psnrValues_verify = A1_Q3_decoding(filename_prefix, nframes, blockSize, paddedWidth, paddedHeight, ...
+    height, width, QP, FMEEnable, FastME)
+
     % Decoder for Y-only frames using motion vectors and residuals
     psnrValues_verify = zeros(1, nframes);  % Store PSNR for each frame, decode vs reconstructed
     
@@ -6,13 +8,13 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
     referenceFrame_de = 128 * ones(paddedHeight, paddedWidth, 'uint8');
     
     % Open the necessary files
-    vid_decoded = fopen('decoded_vid.yuv', 'w');
+    vid_decoded = fopen(strcat(filename_prefix, 'decoded_vid.yuv'), 'w');
     % mvFile = fopen('motion_vectors.txt', 'r');
     % residualFile = fopen('residuals.txt', 'r');
-    vid_reconstructed = fopen('reconstructed_vid.yuv', 'r');
+    vid_reconstructed = fopen(strcat(filename_prefix, 'reconstructed_vid.yuv'), 'r');
 
-    MDiff_file = fopen("MDiff.txt", 'r');
-    QTC_Coeff_file = fopen("QTC_Coeff.txt", 'r');
+    MDiff_file = fopen(strcat(filename_prefix, "MDiff.txt"), 'r');
+    QTC_Coeff_file = fopen(strcat(filename_prefix, "QTC_Coeff.txt"), 'r');
     
     % Loop through frames
     for frameIdx = 1:nframes

@@ -1,0 +1,4 @@
+*.yuv
+*.txt
+
+.DS_Store
