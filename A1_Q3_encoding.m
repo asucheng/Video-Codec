@@ -32,9 +32,10 @@ function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, block
             reference_frames = [];
         else
             fprintf('Dealing with frame %d, F-Period\n', frameIdx);
-            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay);
+            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay, frameIdx);
             type = 'P';
         end
+
 
         % Update the reference frame
         % referenceFrame = reconstructedFrame;

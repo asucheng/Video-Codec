@@ -1,7 +1,17 @@
-function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay)
+function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay, frameIdx)
     Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
     previous_mv = [0, 0];
     previous_ref_index = 0;
+
+    colors = [
+        255, 0, 0;    % Red for reference frame 1
+        0, 255, 0;    % Green for reference frame 2
+        0, 0, 255;    % Blue for reference frame 3
+        255, 255, 0;  % Yellow for reference frame 4
+    ];
+
+    % Initialize overlay frame (3 channels for RGB overlay)
+    overlayFrame = zeros(paddedHeight, paddedWidth, 3, 'double');
 
     % Loop over blocks
     for row = 1:blockSize:paddedHeight
@@ -74,10 +84,36 @@ function [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referen
             reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock;
 
             if MRFoverlay == 1
-                reconstructedFrame = addColorOverlayReconstructed(reconstructedFrame, best_ref_index, row, col, blockSize);
+                overlayColor = colors(best_ref_index, :);
+                for channel = 1:3
+                    overlayFrame(row:row+blockSize-1, col:col+blockSize-1, channel) = ...
+                        (0.5 * reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1)) + ...
+                        (0.5 * overlayColor(channel)); % Alpha blending (50%)
+                end
             end
             
         end
+    end
+
+    if MRFoverlay == 1
+        % Clamp overlay frame values to valid range [0, 255]
+        overlayFrame = uint8(max(min(overlayFrame, 255), 0));
+
+        % Display the overlay frame
+        % imshow(overlayFrame);
+
+        outputFolder = 'output_frames';  % Directory to save the images
+        % Create output folder if it doesn't exist
+        if ~exist(outputFolder, 'dir')
+            mkdir(outputFolder);
+        end
+        
+        
+        % Save the overlay image as a PNG file
+        outputFileName = fullfile(outputFolder, sprintf('frame_overlay_%03d.png', frameIdx));
+        imwrite(overlayFrame, outputFileName);
+    
+        fprintf('Saved overlay frame %d as %s\n', frameIdx, outputFileName);
     end
 end
 
@@ -116,25 +152,45 @@ function [bestMatch, predictedBlock, bestMAE] = InterPredictBLK(referenceFrame, 
     predictedBlock = referenceFrame(bestRow:bestRow+blockSize-1, bestCol:bestCol+blockSize-1);
 end
 
-function colorCodedVideo = addColorOverlayReconstructed(reconstructedFrame, refFrameIndex, row, col, blockSize)
-    % Parameters
-    colorCodedVideo = zeros(blockSize, blockSize, 3, 'uint8');  % Initialize RGB video
-    
-    % Define colors for each reference frame
-    colors = [
-        255, 0, 0;  % Red for reference frame 1
-        0, 255, 0;  % Green for reference frame 2
-        0, 0, 255;  % Blue for reference frame 3
-        255, 255, 0 % Yellow for reference frame 4 (if used)
-    ]; 
-    
-    % Get the color for this reference frame
-    color = colors(refFrameIndex, :);
-    
-    % Apply the overlay to the block
-    for channel = 1:3
-        colorCodedVideo(row:row+blockSize-1, col:col+blockSize-1, channel) = ...
-            uint8(0.5 * double(reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1)) + ...
-                  0.5 * double(color(channel))); % Alpha blending (50% overlay)
-    end
-end
+
+% function yuvImageWithOverlay = addColorOverlayToYUV(yuvImage, alpha)
+%     % Ensure input YUV image is double for calculations
+%     yuvImage = double(yuvImage);
+% 
+%     colors = [
+%         255, 0, 0;  % Red for reference frame 1
+%         0, 255, 0;  % Green for reference frame 2
+%         0, 0, 255;  % Blue for reference frame 3
+%         255, 255, 0 % Yellow for reference frame 4 (if used)
+%     ]; 
+% 
+%     % Get the color for this reference frame
+%     color = colors(refFrameIndex, :);
+% 
+%     % Convert the overlay color from RGB to YUV
+%     transformationMatrix = [
+%         0.299,  0.587,  0.114;
+%        -0.14713, -0.28886,  0.436;
+%         0.615,  -0.51499, -0.10001
+%     ];
+%     offset = [0; 128; 128];
+%     overlayColorYUV = transformationMatrix * color(:) + offset;
+% 
+%     % Separate Y, U, and V channels
+%     Y = yuvImage(:, :, 1);
+%     U = yuvImage(:, :, 2);
+%     V = yuvImage(:, :, 3);
+% 
+%     % Blend the U and V channels with the overlay color
+%     U_overlay = (1 - alpha) * U + alpha * overlayColorYUV(2);
+%     V_overlay = (1 - alpha) * V + alpha * overlayColorYUV(3);
+% 
+%     % Combine the channels back into a YUV image
+%     yuvImageWithOverlay = cat(3, Y, U_overlay, V_overlay);
+% 
+%     % Clamp the U and V channels to valid range [0, 255]
+%     yuvImageWithOverlay(:, :, 2:3) = max(min(yuvImageWithOverlay(:, :, 2:3), 255), 0);
+% 
+%     % Convert back to uint8 for output
+%     yuvImageWithOverlay = uint8(yuvImageWithOverlay);
+% end
