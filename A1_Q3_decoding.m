@@ -1,4 +1,4 @@
-function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, paddedHeight, height, width, QP)    
+function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, paddedHeight, height, width, QP, nRefFrames)    
     % Decoder for Y-only frames using motion vectors and residuals
     psnrValues_verify = zeros(1, nframes);  % Store PSNR for each frame, decode vs reconstructed
     
@@ -22,6 +22,7 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
 
         previous_mv = [0, 0];
         previous_mode = 0;
+        previous_ref_index = 0;
         
         % Loop over blocks in raster order
         for row = 1:blockSize:paddedHeight
@@ -50,8 +51,14 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
                         continue;  % Skip if the predictor block goes out of bounds
                     end
-                    
+
+                    % update the ref index differentiation
+                    diff_ref_index = MDiff_line_array(2);
+                    best_ref_index = diff_ref_index + previous_ref_index;
+                    previous_ref_index = best_ref_index;
+
                     % Extract the predictor block from the reference frame
+                    referenceFrame_de = referenceFrames_de{best_ref_index};
                     predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
 
                     % handle QTC file------------------------------------------
@@ -70,6 +77,9 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
                     decodedFrame(row:row+blockSize-1, col:col+blockSize-1) = decodedBlock;
                 else
                     % decode I frame
+                    % Clear the reference frames on I-frame
+                    referenceFrames_de = [];
+
                     block_height = min(blockSize, paddedHeight - row + 1);
                     block_width = min(blockSize, paddedWidth - col + 1);
                     diff_mode = MDiff_line_array(2);
@@ -111,7 +121,8 @@ function psnrValues_verify = A1_Q3_decoding(nframes, blockSize, paddedWidth, pad
         end
 
         % Update the reference frame for the next iteration
-        referenceFrame_de = decodedFrame;
+        % referenceFrame_de = decodedFrame;
+        referenceFrames_de = A2_Q1_updateFIFObuffer(referenceFrames_de, nRefFrames, decodedFrame);
         
         % Remove padding by cropping the frame
         unpaddedDecodeFrame = decodedFrame(1:height, 1:width);

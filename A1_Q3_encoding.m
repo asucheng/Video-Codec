@@ -1,4 +1,4 @@
-function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values, nRefFrames)
+function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values, nRefFrames, MRFoverlay)
     % Open video files
     vid_out_Y_pad = fopen('y_only_padded.yuv', 'r');
     vid_out_Y = fopen('y_only.yuv', 'r');
@@ -32,7 +32,7 @@ function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, block
             reference_frames = [];
         else
             fprintf('Dealing with frame %d, F-Period\n', frameIdx);
-            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, nRefFrames);
+            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay);
             type = 'P';
         end
 
