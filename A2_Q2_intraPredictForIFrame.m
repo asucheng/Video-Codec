@@ -13,7 +13,7 @@ function [predictedFrame, reconstructedFrame] = A2_Q2_intraPredictForIFrame(orig
             block = original_frame(i:i+block_height-1, j:j+block_width-1);
             [predicted_block, mode, split_flag] = A2_Q2_intraPredictForBlock(original_frame, i, j, block_height, block_width, VBSenable, QP, lambda);
 
-            if split_flag
+            if VBSenable && split_flag 
                 % Encode split flag
                 fprintf(MDiff_stream, '%s\n', A1_Q4_expGolombEncode(1)); % 1 indicates split
 
@@ -55,23 +55,43 @@ function [predictedFrame, reconstructedFrame] = A2_Q2_intraPredictForIFrame(orig
                     reconstructedFrame(si:si+sh-1, sj:sj+sw-1) = sub_reconstructed;
                 end
             else
-                % Non-split processing
-                % Encode non-split flag
-                fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(mode - previous_mode));
+                % Non-split logic: Encode split flag, frame type (I-frame), and mode difference
+                block_height = min(block_size, h - i + 1);
+                block_width = min(block_size, w - j + 1);
+       
+                % get the current block
+                block = original_frame(i:i+block_height-1, j:j+block_width-1);
+    
+                % Perform intra prediction of current block
+                [predicted_block, mode] = A2_Q2_intraPredictForBlock(original_frame, i, j, block_height, block_width, VBSenable);
+    
+                predictedFrame(i:i+block_height-1, j:j+block_width-1) = predicted_block;
+    
+                differential_mode = mode - previous_mode;
                 previous_mode = mode;
-
-                % Encode residual for non-split block
+                %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
+                encoded_diff = A1_Q4_expGolombEncode(differential_mode);
+                fprintf(MDiff_stream, '%s %s %s\n',A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(1), encoded_diff);
+     
+                % get the residuals of block
                 residual_block = block - predicted_block;
-                [encoded_block, quantized_block] = A2_Q2_quantizeAndEncode(residual_block, QP);
-                fprintf(QTC_stream, '%s\n', encoded_block);
-
-                % Decode and reconstruct non-split block
-                decoded_residual_block = A2_Q2_idctAfterDequantizeBlock(quantized_block, Q_Matrix);
+    
+                % encode the residual block
+                encoded_residual_block = A1_Q4_quantizeBlockAfterDCT(residual_block, Q_Matrix);
+    
+                scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
+                rle_encoded = A1_Q4_rleEncode(scanned_coeffs, block_size);
+                %QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
+                encoded_value = A1_Q4_expGolombEncode(rle_encoded);
+                fprintf(QTC_stream, '%s\n', encoded_value);
+    
+                % decode the encoded block and add it to prediction
+                decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);
                 reconstructed_block = predicted_block + decoded_residual_block;
                 reconstructed_block = max(min(reconstructed_block, 255), 0);
-
-                % Update frames
-                predictedFrame(i:i+block_height-1, j:j+block_width-1) = predicted_block;
+    
+                % store the encode residual block and reconstructed block
+                encoded_frame(i:i+block_height-1, j:j+block_width-1) = encoded_residual_block;
                 reconstructedFrame(i:i+block_height-1, j:j+block_width-1) = reconstructed_block;
             end
         end
