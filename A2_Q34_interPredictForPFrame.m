@@ -2,20 +2,6 @@ function [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(ref
     blockSize, paddedHeight, paddedWidth, n, QP, ...
     MDiff_stream, MVPDiff_stream, QTC_stream, FMEEnable, FastME)
 
-    % A2_Q3_interPredictForPFrame: Perform inter-frame prediction for P-Frames
-    % with optional fractional motion estimation (FME).
-    %
-    % Inputs:
-    %   - referenceFrame: Single reference frame
-    %   - currentFrame: Current frame to predict
-    %   - searchRange: Range for motion estimation
-    %   - blockSize: Size of the macroblock (e.g., 16x16)
-    %   - paddedHeight, paddedWidth: Padded dimensions of the frame
-    %   - n: Quantization parameter
-    %   - QP_values: Quantization parameters
-    %   - MDiff_stream, QTC_stream: File handles for motion vectors and residuals
-    %   - FMEEnable: Enable fractional motion estimation
-
     Q_Matrix = A2_Q34_generateQMatrix(blockSize, QP);
     previous_mv = [0, 0];
     previous_mvp = [0, 0];
