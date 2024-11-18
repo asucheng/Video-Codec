@@ -96,7 +96,7 @@ function psnrValues_verify = A1_Q3_decoding(filename_prefix, nframes, blockSize,
                     % decode I frame
                     block_height = min(blockSize, paddedHeight - row + 1);
                     block_width = min(blockSize, paddedWidth - col + 1);
-                    diff_mode = MDiff_line_array(2);
+                    diff_mode = MDiff_line_array(3);
 
                     mode = diff_mode + previous_mode;
                     previous_mode = mode;

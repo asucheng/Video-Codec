@@ -1,6 +1,6 @@
 function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, paddedHeight, ...
     blockSize, height, width, searchRange, n, ...
-    I_period, QP_values, FMEEnable, FastME)
+    I_period, QP_values, VBSenable, FMEEnable, FastME)
 
     % Open video files
     vid_out_Y_pad = fopen('y_only_padded.yuv', 'r');
@@ -15,15 +15,11 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
     QTC_stream = fopen(strcat(filename_prefix, 'QTC_Coeff.txt'), 'w');
     MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
     
-    % Store PSNR for each frame, reconstructed vs original
-    psnrValues = zeros(1, nframes);  
+    psnrValues = zeros(1, nframes); % Store PSNR for each frame
+    referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8'); % Initial reference frame
 
-    % initialize a reference frame for first frame
-    referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8');
-
-    % loop throught each frame
+    % Loop through frames
     for frameIdx = 1:nframes
-        % Read current frame
         currentFrame = fread(vid_out_Y_pad, [paddedWidth, paddedHeight], 'uint8')';
         % currentIFrame = fread(vid_out_Y, [width, height], 'uint8')';
 
@@ -41,34 +37,21 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
             type = 'P';
         end
 
-        % Update the reference frame
-        referenceFrame = reconstructedFrame;
+        referenceFrame = reconstructedFrame; % Update reference frame
 
-        % Remove padding by cropping the frame
-        % Write predicted frame
-        unpaddedpredictedFrame = predictedFrame(1:height, 1:width);
-        fwrite(predicted_vid, unpaddedpredictedFrame', 'uint8');
-
-        % Remove padding by cropping the frame
-        % Write reconstructed frame
+        % Save predicted and reconstructed frames
+        unpaddedPredictedFrame = predictedFrame(1:height, 1:width);
+        fwrite(predicted_vid, unpaddedPredictedFrame', 'uint8');
         unpaddedReconstructedFrame = reconstructedFrame(1:height, 1:width);
         fwrite(vid_reconstructed, unpaddedReconstructedFrame', 'uint8');
-
-        % Compute Mean Squared Error (MSE)
         unpaddedCurrentFrame = currentFrame(1:height, 1:width);
         mse = mean((double(unpaddedCurrentFrame(:)) - double(unpaddedReconstructedFrame(:))).^2);
         
         % Compute PSNR
-        if mse == 0
-            psnrValues(frameIdx) = Inf;  % Perfect reconstruction
-        else
-            psnrValues(frameIdx) = 10 * log10(255^2 / mse);
-        end
+        psnrValues(frameIdx) = 10 * log10(255^2 / mse);
     end
 
-    % Close files
     fclose(vid_out_Y_pad);
-    fclose(vid_out_Y);
     fclose(vid_reconstructed);
     fclose(predicted_vid);
     fclose(MDiff_stream);
