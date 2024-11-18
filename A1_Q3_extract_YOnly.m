@@ -22,7 +22,7 @@ function A1_Q3_extract_YOnly(originalVid, og_height, og_width, nframes)
         % fwrite(outputFile, Y, 'uint8');
         % fclose(outputFile);
     
-        %skip UV for each frame
+        % skip UV for each frame
         fseek(vid, (og_width/2) * (og_height/2) * 2, 'cof');
     end
     
