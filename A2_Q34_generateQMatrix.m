@@ -1,4 +1,4 @@
-function Q_Matrix = A1_Q4_generateQMatrix(i, QP)
+function Q_Matrix = A2_Q3_generateQMatrix(i, QP)
     % Generate Q matrix based on QP
     Q_Matrix = zeros(i, i);
 
