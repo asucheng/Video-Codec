@@ -1,4 +1,4 @@
-function [predicted_block, mode] = A1_Q4_intraPredictForBlock(frame, i, j, block_height, block_width, VBSenable)
+function [predicted_block, mode] = A1_Q4_intraPredictForBlock(frame, i, j, block_height, block_width)
     current_block = frame(i:i+block_height-1, j:j+block_width-1);
 
     if j == 1
