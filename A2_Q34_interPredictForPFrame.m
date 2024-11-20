@@ -1,178 +1,270 @@
-function [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(referenceFrame, currentFrame, searchRange, ...
-    blockSize, paddedHeight, paddedWidth, n, QP, ...
-    MDiff_stream, MVPDiff_stream, QTC_stream, FMEEnable, FastME)
-
-    Q_Matrix = A2_Q34_generateQMatrix(blockSize, QP);
+function [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP, MDiff_stream, MVPDiff_stream, QTC_stream, VBSenable, FMEEnable, FastME)
+    % Initialize parameters
+    Q_Matrix = A1_Q4_generateQMatrix(blockSize, QP);
+    Lambda = A2_Q2_getLambda(QP);
     previous_mv = [0, 0];
     previous_mvp = [0, 0];
     mvp = [0, 0];
-
+    
     predictedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
     reconstructedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
-
+    
     % Loop over blocks
-    for row = 1:blockSize:paddedHeight
-        for col = 1:blockSize:paddedWidth
-            % Boundary check
-            if row + blockSize - 1 > paddedHeight || col + blockSize - 1 > paddedWidth
+    for i = 1:blockSize:paddedHeight
+        for j = 1:blockSize:paddedWidth
+            % Adjust block dimensions for edge cases
+            block_height = min(blockSize, paddedHeight - i + 1);
+            block_width = min(blockSize, paddedWidth - j + 1);
+            if block_height < blockSize || block_width < blockSize
                 continue;
             end
-
-            % Current block
-            currentBlock = currentFrame(row:row+blockSize-1, col:col+blockSize-1);
+            currentBlock = currentFrame(i:i+block_height-1, j:j+block_width-1);
             
-            % find the best match mv and predicted block
-            [best_mv, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
-                searchRange, blockSize, paddedWidth, paddedHeight, ...
-                FMEEnable, FastME, mvp);
-
-            % Update predicted frame for next iteration
-            predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
-
-            % update the motion vector differentiation
-            if FastME
-                mvp = best_mv;
-                mvp_diff = mvp - previous_mvp;
-                previous_mvp = mvp;
-                fprintf(MVPDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                    A1_Q4_expGolombEncode(mvp_diff(1)), ...
-                    A1_Q4_expGolombEncode(mvp_diff(2)));
+            if VBSenable && blockSize >= 8  % Minimum block size for splitting
+                % **Variable Block Size Logic**
+                
+                % Compute RD cost for non-split case
+                [best_mv_ns, predictedBlock_ns] = InterPredictBLK(referenceFrame, currentBlock, i, j, searchRange, blockSize, paddedWidth, paddedHeight, FMEEnable, FastME, mvp);
+                residualBlock_ns = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
+                mode = 0;  % Mode can be set to 0 for inter-prediction
+                [J_ns, encoded_block_ns] = A2_Q2_computeRD(residualBlock_ns, mode, QP, Lambda);
+                
+                % Add MV cost to non-split RD cost
+                diff_mv_ns = best_mv_ns - previous_mv;
+                mv_bits_ns = A1_Q4_bitcountFromArray([diff_mv_ns(1), diff_mv_ns(2)]);
+                J_ns = J_ns + Lambda * mv_bits_ns;
+                
+                % **Split Block Logic**
+                split_size = blockSize / 2;
+                J_split = 0;
+                sub_mvs = zeros(4, 2);
+                sub_encoded_blocks = cell(4, 1);
+                temp_prev_mv = previous_mv;
+                relative_offsets = [0, 0; 0, split_size; split_size, 0; split_size, split_size];
+                sub_predicted = zeros(blockSize, blockSize, 'uint8');
+                
+                for idx = 1:4
+                    relSubRow = relative_offsets(idx, 1) + 1;
+                    relSubCol = relative_offsets(idx, 2) + 1;
+                    absSubRow = i + relative_offsets(idx, 1);
+                    absSubCol = j + relative_offsets(idx, 2);
+                    
+                    sub_block_height = min(split_size, paddedHeight - absSubRow + 1);
+                    sub_block_width = min(split_size, paddedWidth - absSubCol + 1);
+                    if sub_block_height < split_size || sub_block_width < split_size
+                        continue;
+                    end
+                    
+                    sub_block = currentFrame(absSubRow:absSubRow+sub_block_height-1, absSubCol:absSubCol+sub_block_width-1);
+                    
+                    % Motion estimation for sub-block
+                    [sub_mv, sub_pred] = InterPredictBLK(referenceFrame, sub_block, absSubRow, absSubCol, searchRange, split_size, paddedWidth, paddedHeight, FMEEnable, FastME, mvp);
+                    
+                    sub_residual = A1_Q3_calcResidual(sub_pred, sub_block, n);
+                    mode = 0;  % Mode for inter-prediction
+                    [sub_J, sub_encoded] = A2_Q2_computeRD(sub_residual, mode, QP, Lambda);
+                    
+                    % Add MV cost
+                    diff_sub_mv = sub_mv - temp_prev_mv;
+                    mv_bits = A1_Q4_bitcountFromArray([diff_sub_mv(1), diff_sub_mv(2)]);
+                    sub_J = sub_J + Lambda * mv_bits;
+                    
+                    J_split = J_split + sub_J;
+                    sub_mvs(idx, :) = sub_mv;
+                    temp_prev_mv = sub_mv;
+                    
+                    % Store predicted block and encoded data
+                    rowRange = relSubRow:relSubRow+sub_block_height-1;
+                    colRange = relSubCol:relSubCol+sub_block_width-1;
+                    sub_predicted(rowRange, colRange) = sub_pred;
+                    sub_encoded_blocks{idx} = sub_encoded;
+                end
+                
+                % Add split flag cost
+                J_split = J_split + Lambda * A1_Q4_bitcountFromArray(1);
+                J_ns = J_ns + Lambda * A1_Q4_bitcountFromArray(0);
+                
+                % **Choose between split and non-split**
+                if J_split < J_ns
+                    % Use split blocks
+                    fprintf(MDiff_stream, '%s %s \n', A1_Q4_expGolombEncode(1),A1_Q4_expGolombEncode(0));  % Split flag = 1
+                    % Process each sub-block
+                    for idx = 1:4
+                        diff_mv = sub_mvs(idx, :) - previous_mv;
+                        previous_mv = sub_mvs(idx, :);
+                        fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)));
+                        fprintf(QTC_stream, '%s\n', sub_encoded_blocks{idx});
+                        
+                        % Reconstruct sub-block
+                        relSubRow = relative_offsets(idx, 1) + 1;
+                        relSubCol = relative_offsets(idx, 2) + 1;
+                        absSubRow = i + relative_offsets(idx, 1);
+                        absSubCol = j + relative_offsets(idx, 2);
+                        sub_block_height = min(split_size, paddedHeight - absSubRow + 1);
+                        sub_block_width = min(split_size, paddedWidth - absSubCol + 1);
+                        rowRange = absSubRow:absSubRow+sub_block_height-1;
+                        colRange = absSubCol:absSubCol+sub_block_width-1;
+                        
+                        % Decoding
+                        decoded_block = A1_Q4_expGolombDecode(sub_encoded_blocks{idx});
+                        decoded_coeffs = A1_Q4_rleDecode(decoded_block, split_size);
+                        decoded_quantized_block = A1_Q4_inverseSScan(decoded_coeffs, split_size, split_size);
+                        decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(decoded_quantized_block, Q_Matrix(1:split_size, 1:split_size));
+                        
+                        reconstructedBlock = double(sub_predicted(relSubRow:relSubRow+sub_block_height-1, relSubCol:relSubCol+sub_block_width-1)) + decoded_residual_block;
+                        reconstructedBlock = max(min(reconstructedBlock, 255), 0);
+                        reconstructedFrame(rowRange, colRange) = uint8(reconstructedBlock);
+                        predictedFrame(rowRange, colRange) = sub_predicted(relSubRow:relSubRow+sub_block_height-1, relSubCol:relSubCol+sub_block_width-1);
+                    end
+                else
+                    % Use non-split block
+                    diff_mv = best_mv_ns - previous_mv;
+                    previous_mv = best_mv_ns;
+                    fprintf(MDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)));
+                    fprintf(QTC_stream, '%s\n', encoded_block_ns);
+                    
+                    % Reconstruct block
+                    decoded_block = A1_Q4_expGolombDecode(encoded_block_ns);
+                    decoded_coeffs = A1_Q4_rleDecode(decoded_block, blockSize);
+                    decoded_quantized_block = A1_Q4_inverseSScan(decoded_coeffs, blockSize, blockSize);
+                    decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(decoded_quantized_block, Q_Matrix);
+                    
+                    reconstructedBlock = double(predictedBlock_ns) + decoded_residual_block;
+                    reconstructedBlock = max(min(reconstructedBlock, 255), 0);
+                    reconstructedFrame(i:i+block_height-1, j:j+block_width-1) = uint8(reconstructedBlock);
+                    predictedFrame(i:i+block_height-1, j:j+block_width-1) = predictedBlock_ns;
+                end
             else
-                diff_mv = best_mv - previous_mv;
-                previous_mv = best_mv;
-                % generate MDiff with MV
-                fprintf(MDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                    A1_Q4_expGolombEncode(diff_mv(1)), ...
-                    A1_Q4_expGolombEncode(diff_mv(2)));
+                % **Non-VBS Path**
+                [best_mv, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, i, j, searchRange, blockSize, paddedWidth, paddedHeight, FMEEnable, FastME, mvp);
+                
+                % Update motion vectors and bitstreams
+                if FastME
+                    mvp = best_mv;
+                    mvp_diff = mvp - previous_mvp;
+                    previous_mvp = mvp;
+                    % split flag, I-frame-flage
+                    fprintf(MVPDiff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(mvp_diff(1)), A1_Q4_expGolombEncode(mvp_diff(2)));
+                else
+                    diff_mv = best_mv - previous_mv;
+                    previous_mv = best_mv;
+                    fprintf(MDiff_stream, '%s %s %s %s\n',A1_Q4_expGolombEncode(0),A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)));
+                end
+                
+                % Compute residual
+                residualBlock = A1_Q3_calcResidual(predictedBlock, currentBlock, n);
+                mode = 0;  % Mode for inter-prediction
+                [~, encoded_block] = A2_Q2_computeRD(residualBlock, mode, QP, Lambda);
+                fprintf(QTC_stream, '%s\n', encoded_block);
+                
+                % Reconstruct block
+                decoded_block = A1_Q4_expGolombDecode(encoded_block);
+                decoded_coeffs = A1_Q4_rleDecode(decoded_block, blockSize);
+                decoded_quantized_block = A1_Q4_inverseSScan(decoded_coeffs, blockSize, blockSize);
+                decoded_residual_block = A1_Q4_idctAfterDequantizeBlock(decoded_quantized_block, Q_Matrix);
+                
+                reconstructedBlock = double(predictedBlock) + decoded_residual_block;
+                reconstructedBlock = max(min(reconstructedBlock, 255), 0);
+                reconstructedFrame(i:i+block_height-1, j:j+block_width-1) = uint8(reconstructedBlock);
+                predictedFrame(i:i+block_height-1, j:j+block_width-1) = predictedBlock;
             end
-            % Save the motion vector
-            % fprintf(mvFile, 'Frame %d, Block (%d, %d): MV = (%d, %d)\n', frameIdx, row, col, best_mv(1), best_mv(2));
-            
-            % find Residual block
-            residualBlock = uint16(currentBlock) - uint16(predictedBlock);
-
-            % encode the residual block
-            encoded_residual_block = A2_Q34_quantizeBlockAfterDCT(residualBlock, Q_Matrix);
-            % generate QTC stream
-            scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
-            rle_encoded = A1_Q4_rleEncode(scanned_coeffs, blockSize);
-            % QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
-            encoded_value = A1_Q4_expGolombEncode(rle_encoded);
-            fprintf(QTC_stream, '%s\n', encoded_value);   % each line is a block
-
-            decoded_residual_block = A2_Q34_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);
-
-            % Reconstruct block and update the reconstructed frame
-            reconstructedBlock = double(predictedBlock) + decoded_residual_block;
-            reconstructedBlock = max(min(reconstructedBlock, 255), 0);
-            reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock;
         end
     end
 end
 
-function [bestMatch, bestPredictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
-    searchRange, blockSize, paddedWidth, paddedHeight, ...
-    FMEEnable, FastME, mvp)
-
-    bestMAE = inf;
-    bestMatch = [0, 0];
-    bestPredictedBlock = zeros(blockSize, blockSize, 'uint8');
-
+function [best_mv, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, FMEEnable, FastME, mvp)
+    bestMAE = Inf;
+    best_mv = [0, 0];
+    block_height = size(currentBlock, 1);
+    block_width = size(currentBlock, 2);
+    predictedBlock = zeros(block_height, block_width, 'uint8');
+    
     if FastME
+        % Fast Motion Estimation using MVP
         candidates = [
-            mvp,
-            mvp + [0, 1],
-            mvp + [0, -1],
-            mvp + [1, 0],
-            mvp + [-1, 0]
+            mvp;
+            mvp + [0, 1];
+            mvp + [0, -1];
+            mvp + [1, 0];
+            mvp + [-1, 0];
         ];
     else
-        [dy, dx] = meshgrid(-searchRange: searchRange, -searchRange: searchRange);
-        candidates = [dy(:), dx(:)];
+        % Full search
+        [dx, dy] = meshgrid(-searchRange:searchRange, -searchRange:searchRange);
+        candidates = [dx(:), dy(:)];
     end
-
-    % Full search within search range
-    for i = 1:size(candidates, 1)
-        mv = candidates(i, :);
-        refRow = row + mv(1);
-        refCol = col + mv(2);
-
-        if refRow < 1 || refCol < 1 || refRow+blockSize-1 > paddedHeight || refCol+blockSize-1 > paddedWidth
+    
+    for idx = 1:size(candidates, 1)
+        mv = candidates(idx, :);
+        refRow = row + mv(2);
+        refCol = col + mv(1);
+        
+        % Boundary check
+        if refRow < 1 || refCol < 1 || refRow + block_height - 1 > paddedHeight || refCol + block_width -1 > paddedWidth
             continue;
         end
-
-        % Reference block
-        referenceBlock = referenceFrame(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
-
+        
+        % Get reference block
         if FMEEnable
-            referenceBlock = PerformInterpolation(referenceFrame, mv, refRow, refCol, blockSize);
+            referenceBlock = PerformInterpolation(referenceFrame, mv, refRow, refCol, block_height, block_width);
+        else
+            referenceBlock = referenceFrame(refRow:refRow+block_height-1, refCol:refCol+block_width-1);
         end
+        
+        % Compute MAE
         mae = mean(abs(double(currentBlock(:)) - double(referenceBlock(:))));
-
-        % Update best match based on MAE and motion vector criteria
+        
+        % Update best match
         if mae < bestMAE || ...
-           (mae == bestMAE && abs(mv(2)) + abs(mv(1)) < abs(bestMatch(1)) + abs(bestMatch(2))) || ...
-           (mae == bestMAE && abs(mv(2)) + abs(mv(1)) == abs(bestMatch(1)) + abs(bestMatch(2)) && ...
-           (mv(1) < bestMatch(2) || (mv(1) == bestMatch(2) && mv(2) < bestMatch(1))))
+           (mae == bestMAE && sum(abs(mv)) < sum(abs(best_mv))) || ...
+           (mae == bestMAE && sum(abs(mv)) == sum(abs(best_mv)) && (mv(2) < best_mv(2) || (mv(2) == best_mv(2) && mv(1) < best_mv(1))))
             bestMAE = mae;
-            bestMatch = mv;
-            bestPredictedBlock = referenceBlock;
+            best_mv = mv;
+            predictedBlock = referenceBlock;
         end
     end
 end
 
-
-function [interpolatedBlock] = PerformInterpolation(refFrame, mv, row, col, blockSize)
-    int_dy = floor(mv(1) / 2); % Integer vertical motion
-    int_dx = floor(mv(2) / 2); % Integer horizontal motion
-    frac_dy = mod(mv(1), 2) / 2; % Fractional vertical motion (0 or 0.5)
-    frac_dx = mod(mv(2), 2) / 2; % Fractional horizontal motion (0 or 0.5)
-
-    % Perform interpolation for fractional motion estimation.
-    interpolatedBlock = zeros(blockSize, blockSize, 'uint8');
-
-    [ref_height, ref_width] = size(refFrame);
-
-    row = row + int_dy;
-    col = col + int_dx;
-
-    for r = 1:blockSize
-        for c = 1:blockSize
-            % Get fractional pixel location
-            y = row + r - 1;
-            x = col + c - 1;
-
-            top_left_y = max(1, min(y, ref_height));
-            top_left_x = max(1, min(x, ref_width));
-            top_right_x = max(1, min(x + 1, ref_width));
-            bottom_left_y = max(1, min(y + 1, ref_height));
-            bottom_right_y = max(1, min(y + 1, ref_height));
-            bottom_right_x = max(1, min(x + 1, ref_width));
+function interpolatedBlock = PerformInterpolation(refFrame, mv, refRow, refCol, block_height, block_width)
+    int_mv = floor(mv);
+    frac_mv = mv - int_mv;
     
-            top_left = refFrame(top_left_y, top_left_x);
-            top_right = refFrame(top_left_y, top_right_x);
-            bottom_left = refFrame(bottom_left_y, top_left_x);
-            bottom_right = refFrame(bottom_right_y, bottom_right_x);
-
-            % Direct reference pixel (MV = [0, 0])
-            if frac_dx == 0 && frac_dy == 0
-                interpolatedBlock(r, c) = top_left;
-
-            % Horizontal interpolation (MV = [0, 1])
-            elseif frac_dy == 0 && frac_dx ~= 0
-                interpolatedBlock(r, c) = uint8(top_left * (1 - frac_dx) + top_right * frac_dx);
-
-            % Vertical interpolation (MV = [1, 0])
-            elseif frac_dy ~= 0 && frac_dx == 0
-                interpolatedBlock(r, c) = uint8(top_left * (1 - frac_dy) + bottom_left * frac_dy);
-
-            % Diagonal interpolation (MV = [1, 1])
-            else
-                top_interp = top_left * (1 - frac_dx) + top_right * frac_dx;
-                bottom_interp = bottom_left * (1 - frac_dx) + bottom_right * frac_dx;
-                interpolatedBlock(r, c) = uint8(top_interp * (1 - frac_dy) + bottom_interp * frac_dy);
-            end
+    y = refRow;
+    x = refCol;
+    [ref_height, ref_width] = size(refFrame);
+    
+    interpolatedBlock = zeros(block_height, block_width, 'uint8');
+    
+    for r = 1:block_height
+        for c = 1:block_width
+            y_pos = y + r - 1 + frac_mv(2);
+            x_pos = x + c - 1 + frac_mv(1);
+            
+            % Bilinear interpolation
+            interpolatedBlock(r, c) = bilinearInterpolation(refFrame, y_pos, x_pos, ref_height, ref_width);
         end
     end
+end
 
+function value = bilinearInterpolation(refFrame, y, x, ref_height, ref_width)
+    x1 = floor(x);
+    x2 = ceil(x);
+    y1 = floor(y);
+    y2 = ceil(y);
+    
+    x1 = max(1, min(ref_width, x1));
+    x2 = max(1, min(ref_width, x2));
+    y1 = max(1, min(ref_height, y1));
+    y2 = max(1, min(ref_height, y2));
+    
+    Q11 = double(refFrame(y1, x1));
+    Q21 = double(refFrame(y1, x2));
+    Q12 = double(refFrame(y2, x1));
+    Q22 = double(refFrame(y2, x2));
+    
+    value = uint8(...
+        Q11 * (x2 - x) * (y2 - y) + ...
+        Q21 * (x - x1) * (y2 - y) + ...
+        Q12 * (x2 - x) * (y - y1) + ...
+        Q22 * (x - x1) * (y - y1));
 end
