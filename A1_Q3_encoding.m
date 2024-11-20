@@ -1,4 +1,4 @@
-function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values)
+function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, blockSize, height, width, searchRange, n, I_period, QP_values, nRefFrames, MRFoverlay)
     % Open video files
     vid_out_Y_pad = fopen('y_only_padded.yuv', 'r');
     vid_out_Y = fopen('y_only.yuv', 'r');
@@ -15,7 +15,7 @@ function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, block
     psnrValues = zeros(1, nframes);  
 
     % initialize a reference frame for first frame
-    referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8');
+    %referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8');
 
     % loop throught each frame
     for frameIdx = 1:nframes
@@ -27,14 +27,19 @@ function [psnrValues] = A1_Q3_encoding(nframes, paddedWidth, paddedHeight, block
             fprintf('Dealing with frame %d, I-Period\n', frameIdx);
             [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(currentFrame, blockSize, QP_values, MDiff_stream, QTC_stream); 
             type = 'I';
+
+            % Clear the reference frames on I-frame
+            reference_frames = [];
         else
             fprintf('Dealing with frame %d, F-Period\n', frameIdx);
-            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(referenceFrame, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream);
+            [predictedFrame, reconstructedFrame] = A1_Q3_interPredictPFrame(reference_frames, currentFrame, searchRange, blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, QTC_stream, nRefFrames, MRFoverlay, frameIdx);
             type = 'P';
         end
 
+
         % Update the reference frame
-        referenceFrame = reconstructedFrame;
+        % referenceFrame = reconstructedFrame;
+        reference_frames = A2_Q1_updateFIFObuffer(reference_frames, nRefFrames, reconstructedFrame);
 
         % Remove padding by cropping the frame
         % Write predicted frame
