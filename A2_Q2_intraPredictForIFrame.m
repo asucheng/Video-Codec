@@ -9,50 +9,64 @@ function [predictedFrame, reconstructedFrame] = A2_Q2_intraPredictForIFrame(orig
         for j = 1:block_size:size(original_frame, 2)
             block_height = min(block_size, h - i + 1);
             block_width = min(block_size, w - j + 1);
-
+            split_flag = false;
             block = original_frame(i:i+block_height-1, j:j+block_width-1);
             [predicted_block, mode, split_flag] = A2_Q2_intraPredictForBlock(original_frame, i, j, block_height, block_width, VBSenable, QP, lambda);
 
-            if VBSenable && split_flag 
-                % Encode split flag
-                fprintf(MDiff_stream, '%s\n', A1_Q4_expGolombEncode(1)); % 1 indicates split
-
-                % Process each sub-block
+            if VBSenable && split_flag
+                % Encode split flag, I_frame_flag
+                fprintf(MDiff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), A1_Q4_expGolombEncode(1)); % 1 indicates split
+            
+                % Process each sub-block in Z-order
                 split_size = floor(block_size / 2);
-                sub_blocks = {
-                    [i, j, split_size, split_size], ...
-                    [i, j+split_size, split_size, split_size], ...
-                    [i+split_size, j, split_size, split_size], ...
-                    [i+split_size, j+split_size, split_size, split_size]
-                };
-
-                for k = 1:4
-                    si = sub_blocks{k}(1);
-                    sj = sub_blocks{k}(2);
-                    sh = sub_blocks{k}(3);
-                    sw = sub_blocks{k}(4);
-
-                    sub_block = original_frame(si:si+sh-1, sj:sj+sw-1);
-                    [sub_predicted, sub_mode, ~] = A2_Q2_intraPredictForBlock(original_frame, si, sj, sh, sw, false, QP-1, lambda);
-
+                relative_offsets = [0, 0; 0, split_size; split_size, 0; split_size, split_size];
+                sub_Q_Matrix = A2_Q2_generateQMatrix(split_size, QP);
+            
+                for idx = 1:4
+                    % Calculate relative and absolute positions for the sub-block
+                    relSubRow = relative_offsets(idx, 1) + 1; % MATLAB indexing starts at 1
+                    relSubCol = relative_offsets(idx, 2) + 1;
+                    absSubRow = i + relative_offsets(idx, 1);
+                    absSubCol = j + relative_offsets(idx, 2);
+            
+                    % Get the current sub-block
+                    sub_block = original_frame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1);
+            
+                    % Perform intra prediction for sub-block
+                    [sub_predicted, sub_mode, ~] = A2_Q2_intraPredictForBlock(original_frame, absSubRow, absSubCol, split_size, split_size, false, QP, lambda);
+            
                     % Encode sub-block mode
                     diff_sub_mode = sub_mode - previous_mode;
                     previous_mode = sub_mode;
                     fprintf(MDiff_stream, '%s\n', A1_Q4_expGolombEncode(diff_sub_mode));
-
-                    % Encode sub-block residual
-                    sub_residual = sub_block - sub_predicted;
-                    [sub_encoded, sub_quantized] = A2_Q2_quantizeAndEncode(sub_residual, QP-1);
-                    fprintf(QTC_stream, '%s\n', sub_encoded);
-
+            
+                    % Calculate residual block
+                    residual_block = sub_block - sub_predicted;
+            
+                    % Encode residual block
+                    encoded_residual_block = A1_Q4_quantizeBlockAfterDCT(residual_block, sub_Q_Matrix);
+            
+                    % Perform scanning and RLE
+                    scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
+                    rle_encoded = A1_Q4_rleEncode(scanned_coeffs, split_size);
+            
+                    % Apply exp-Golomb encoding and write to QTC stream
+                    encoded_value = A1_Q4_expGolombEncode(rle_encoded);
+                    fprintf(QTC_stream, '%s\n', encoded_value);
+            
+                    % Reconstruct residual block (aligning with decoder)
+                    decoded_rle = A1_Q4_expGolombDecode(encoded_value);  % Decode exp-Golomb
+                    decoded_scanned = A1_Q4_rleDecode(decoded_rle, split_size);  % RLE decode
+                    decoded_coeffs = A1_Q4_inverseSScan(decoded_scanned, split_size, split_size);  % Inverse scan
+                    reconstructed_residual_block = A1_Q4_idctAfterDequantizeBlock(decoded_coeffs, sub_Q_Matrix);
+            
                     % Reconstruct sub-block
-                    sub_residual_decoded = A2_Q2_idctAfterDequantizeBlock(sub_quantized, A2_Q2_generateQMatrix(split_size, QP-1));
-                    sub_reconstructed = sub_predicted + sub_residual_decoded;
+                    sub_reconstructed = sub_predicted + reconstructed_residual_block;
                     sub_reconstructed = max(min(sub_reconstructed, 255), 0);
-
-                    % Update predicted and reconstructed frames
-                    predictedFrame(si:si+sh-1, sj:sj+sw-1) = sub_predicted;
-                    reconstructedFrame(si:si+sh-1, sj:sj+sw-1) = sub_reconstructed;
+            
+                    % Update reconstructed and predicted frames
+                    reconstructedFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1) = sub_reconstructed;
+                    predictedFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1) = sub_predicted;
                 end
             else
                 % Non-split logic: Encode split flag, frame type (I-frame), and mode difference
@@ -63,7 +77,7 @@ function [predictedFrame, reconstructedFrame] = A2_Q2_intraPredictForIFrame(orig
                 block = original_frame(i:i+block_height-1, j:j+block_width-1);
     
                 % Perform intra prediction of current block
-                [predicted_block, mode] = A2_Q2_intraPredictForBlock(original_frame, i, j, block_height, block_width, VBSenable);
+                [predicted_block, mode] = A2_Q2_intraPredictForBlock(original_frame, i, j, block_height, block_width, false);
     
                 predictedFrame(i:i+block_height-1, j:j+block_width-1) = predicted_block;
     
@@ -71,6 +85,7 @@ function [predictedFrame, reconstructedFrame] = A2_Q2_intraPredictForIFrame(orig
                 previous_mode = mode;
                 %MDiff_stream = [MDiff_stream, A1_Q4_expGolombEncode(differential_mode)];
                 encoded_diff = A1_Q4_expGolombEncode(differential_mode);
+                % split_flag, I_frame_flag, diff
                 fprintf(MDiff_stream, '%s %s %s\n',A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(1), encoded_diff);
      
                 % get the residuals of block
