@@ -52,10 +52,10 @@ function psnrValues_verify = A1_Q3_decoding(filename_prefix, nframes, blockSize,
                     previous_mv = bestMatch;
 
                     if FMEEnable
-                        int_dy = floor(bestMatch(2) / 2);
-                        int_dx = floor(bestMatch(1) / 2);
-                        frac_dy = mod(bestMatch(2), 2) / 2;
-                        frac_dx = mod(bestMatch(1), 2) / 2;
+                        int_dy = floor(bestMatch(1) / 2);
+                        int_dx = floor(bestMatch(2) / 2);
+                        frac_dy = mod(bestMatch(1), 2) / 2;
+                        frac_dx = mod(bestMatch(2), 2) / 2;
 
                         refRow = row + int_dy;
                         refCol = col + int_dx;

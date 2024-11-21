@@ -25,9 +25,7 @@ function [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(ref
             [bestMatch, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
                 searchRange, blockSize, paddedWidth, paddedHeight, ...
                 FMEEnable, FastME, mvp);
-            if bestMatch(1) ~= 0
-                        disp("1")
-            end
+
             % Update predicted frame for next iteration
             predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
 
