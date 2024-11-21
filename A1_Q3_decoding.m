@@ -50,7 +50,7 @@ function psnrValues_verify = A1_Q3_decoding(filename_prefix, nframes, blockSize,
                     diff_mv = MDiff_line_array(end-1:end);
                     bestMatch = diff_mv + previous_mv;
                     previous_mv = bestMatch;
- 
+
                     if FMEEnable
                         int_dy = floor(bestMatch(2) / 2);
                         int_dx = floor(bestMatch(1) / 2);
@@ -66,8 +66,8 @@ function psnrValues_verify = A1_Q3_decoding(filename_prefix, nframes, blockSize,
                         predictorBlock = performReverseInterpolation(referenceFrame_de, refRow, refCol, frac_dy, frac_dx, blockSize);
                     else
                         % Use the motion vector to get the predictor block from the reference frame
-                        refRow = row + bestMatch(2); % row + yOffset; 
-                        refCol = col + bestMatch(1); % col + xOffset;
+                        refRow = row + bestMatch(1); % row + yOffset; 
+                        refCol = col + bestMatch(2); % col + xOffset;
                         
                         % Check for boundary in reference frame
                         if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth

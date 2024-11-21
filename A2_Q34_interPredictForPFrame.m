@@ -22,37 +22,39 @@ function [predictedFrame, reconstructedFrame] = A2_Q34_interPredictForPFrame(ref
             currentBlock = currentFrame(row:row+blockSize-1, col:col+blockSize-1);
             
             % find the best match mv and predicted block
-            [best_mv, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
+            [bestMatch, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
                 searchRange, blockSize, paddedWidth, paddedHeight, ...
                 FMEEnable, FastME, mvp);
-
+            if bestMatch(1) ~= 0
+                        disp("1")
+            end
             % Update predicted frame for next iteration
             predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
 
             % update the motion vector differentiation
             if FastME
-                mvp = best_mv;
+                mvp = bestMatch;
                 mvp_diff = mvp - previous_mvp;
                 previous_mvp = mvp;
                 fprintf(MVPDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
                     A1_Q4_expGolombEncode(mvp_diff(1)), ...
                     A1_Q4_expGolombEncode(mvp_diff(2)));
             else
-                diff_mv = best_mv - previous_mv;
-                previous_mv = best_mv;
+                diff_mv = bestMatch - previous_mv;
+                previous_mv = bestMatch;
                 % generate MDiff with MV
                 fprintf(MDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
                     A1_Q4_expGolombEncode(diff_mv(1)), ...
                     A1_Q4_expGolombEncode(diff_mv(2)));
             end
             % Save the motion vector
-            % fprintf(mvFile, 'Frame %d, Block (%d, %d): MV = (%d, %d)\n', frameIdx, row, col, best_mv(1), best_mv(2));
+            % fprintf(mvFile, 'Frame %d, Block (%d, %d): MV = (%d, %d)\n', frameIdx, row, col, bestMatch(1), bestMatch(2));
             
             % find Residual block
-            residualBlock = uint16(currentBlock) - uint16(predictedBlock);
+            residualBlock = A1_Q3_calcResidual(predictedBlock, currentBlock, n);
 
             % encode the residual block
-            encoded_residual_block = A2_Q34_quantizeBlockAfterDCT(residualBlock, Q_Matrix);
+            encoded_residual_block = A1_Q4_quantizeBlockAfterDCT(residualBlock, Q_Matrix);
             % generate QTC stream
             scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
             rle_encoded = A1_Q4_rleEncode(scanned_coeffs, blockSize);
@@ -119,6 +121,7 @@ function [bestMatch, bestPredictedBlock] = InterPredictBLK(referenceFrame, curre
             bestPredictedBlock = referenceBlock;
         end
     end
+    
 end
 
 
