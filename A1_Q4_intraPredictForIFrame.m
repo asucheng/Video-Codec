@@ -5,7 +5,7 @@ function [predictedFrame, reconstructedFrame] = A1_Q4_intraPredictForIFrame(orig
     reconstructedFrame = zeros(h, w);
     predictedFrame = zeros(h, w);
     previous_mode = 0;
-    Lambda = A2_Q2_getLambda(QP)
+    Lambda = A2_Q2_getLambda(QP);
     % Process the frame in blocks
     for i = 1:block_size:h
         for j = 1:block_size:w
