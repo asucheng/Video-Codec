@@ -1,4 +1,4 @@
-function Lambda = A2_Q2_getLambda(QP)
+function Lambda = A2_getLambda(QP)
     if QP == 1
         Lambda = 0.0431;
     elseif QP == 4

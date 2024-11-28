@@ -1,4 +1,4 @@
-function Q_Matrix = A2_Q2_generateQMatrix(block_size, QP)
+function Q_Matrix = A2_generateQMatrix(block_size, QP)
     Q_Matrix = zeros(block_size, block_size);
 
     for x = 1:block_size

@@ -1,178 +1,251 @@
-function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referenceFrame, currentFrame, searchRange, ...
-    blockSize, paddedHeight, paddedWidth, n, QP, ...
-    MDiff_stream, MVPDiff_stream, QTC_stream, FMEEnable, FastME)
+function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(reference_frames, currentFrame, ...
+    searchRange, blockSize, paddedHeight, paddedWidth, n, QP, ...
+    MDiff_stream, MVPDiff_stream, QTC_stream, nRefFrames, frameIdx, ...
+    VBSEnable, MRFoverlay, FMEEnable, FastME)
 
-    Q_Matrix = A2_Q34_generateQMatrix(blockSize, QP);
+    predictedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
+    reconstructedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
+ 
+    Q_Matrix = A2_generateQMatrix(blockSize, QP);
+    lambda = A2_Q2_getLambda(QP);
+
     previous_mv = [0, 0];
     previous_mvp = [0, 0];
     mvp = [0, 0];
 
-    predictedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
-    reconstructedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
+    % determine which stream to store results
+    if FastME
+        Diff_stream = MVPDiff_stream;
+    else
+        Diff_stream = MDiff_stream;
+    end
+
+    % parameter for MRF
+    previous_ref_index = 0;
+    colors = [
+        255, 0, 0;    % Red for reference frame 1
+        0, 255, 0;    % Green for reference frame 2
+        0, 0, 255;    % Blue for reference frame 3
+        255, 255, 0;  % Yellow for reference frame 4
+    ];
+    % Initialize overlay frame (3 channels for RGB overlay)
+    overlayFrame = zeros(paddedHeight, paddedWidth, 3, 'double');
 
     % Loop over blocks
     for row = 1:blockSize:paddedHeight
         for col = 1:blockSize:paddedWidth
+            block_height = min(blockSize, paddedHeight - row + 1);
+            block_width = min(blockSize, paddedWidth - col + 1);
+
             % Boundary check
-            if row + blockSize - 1 > paddedHeight || col + blockSize - 1 > paddedWidth
+            if block_height < blockSize || block_width < blockSize
                 continue;
             end
 
             % Current block
-            currentBlock = currentFrame(row:row+blockSize-1, col:col+blockSize-1);
+            currentBlock = currentFrame(row:row+block_height-1, col:col+block_width-1);
             
-            % find the best match mv and predicted block
-            [best_mv, predictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
-                searchRange, blockSize, paddedWidth, paddedHeight, ...
-                FMEEnable, FastME, mvp);
+            if VBSEnable
+                % Calculate costs for non-split case
+                [bestMatch_ns, predictedBlock_ns, best_ref_index_ns] = A2_interPredictForPBlock(reference_frames, ...
+                    currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, nRefFrames);
 
-            % Update predicted frame for next iteration
-            predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
+                residualBlock_ns = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
+                [J_ns, encoded_block_ns] = A2_Q2_computeRD(residualBlock_ns, 0, QP, lambda);
 
-            % update the motion vector differentiation
-            if FastME
-                mvp = best_mv;
-                mvp_diff = mvp - previous_mvp;
-                previous_mvp = mvp;
-                fprintf(MVPDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                    A1_Q4_expGolombEncode(mvp_diff(1)), ...
-                    A1_Q4_expGolombEncode(mvp_diff(2)));
+                diff_ref_index_ns = best_ref_index_ns - previous_ref_index;
+
+                % Add MV cost to non-split RD cost
+                diff_mv_ns = bestMatch_ns - previous_mv;
+                mv_bits_ns = strlength(A1_Q4_expGolombEncode(diff_mv_ns(1))) + strlength(A1_Q4_expGolombEncode(diff_mv_ns(2))) + strlength(A1_Q4_expGolombEncode(diff_ref_index_ns));
+                J_ns = J_ns + lambda * mv_bits_ns;
+
+                % Calculate split case (4 sub-blocks)
+                split_size = blockSize/2;
+                J_split = 0;
+                relative_offsets = [0, 0; 0, split_size; split_size, 0; split_size, split_size];
+                sub_mvs = zeros(4, 2);
+                sub_ref_idxs = zeros(4, 1);   % might have a problem
+                sub_predicted = zeros(blockSize);
+                sub_reconstructed = zeros(blockSize);
+                sub_encoded_blocks = cell(4, 1);
+                temp_prev_mv = previous_mv;
+                temp_prev_ref_idx = previous_ref_index;
+
+                % Process sub-blocks in Z-order
+                for idx = 1:4
+                    relSubRow = relative_offsets(idx, 1) + 1;
+                    relSubCol = relative_offsets(idx, 2) + 1;
+                    absSubRow = row + relative_offsets(idx, 1);
+                    absSubCol = col + relative_offsets(idx, 2);
+
+                    sub_block = currentFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1);
+                    [sub_mv, sub_pred, sub_ref_idx] = A2_interPredictForPBlock(reference_frames, ...
+                        sub_block, absSubRow, absSubCol, searchRange, split_size, paddedWidth, paddedHeight, nRefFrames);
+                    sub_residual = A1_Q3_calcResidual(sub_pred, sub_block, n);
+                    [sub_J, sub_encoded] = A2_Q2_computeRD(sub_residual, 0, QP, lambda);
+ 
+                    % Add MV cost
+                    diff_sub_ref_idx = sub_ref_idx - temp_prev_ref_idx;
+                    diff_sub_mv = sub_mv - temp_prev_mv;
+                    mv_bits = strlength(A1_Q4_expGolombEncode(diff_sub_mv(1))) + strlength(A1_Q4_expGolombEncode(diff_sub_mv(2))) + strlength(A1_Q4_expGolombEncode(diff_sub_ref_idx));
+                    sub_J = sub_J + lambda * mv_bits;
+
+                    J_split = J_split + sub_J;
+                    sub_mvs(idx, :) = sub_mv;
+                    sub_ref_idxs(idx, :) = sub_ref_idx;
+                    
+                    rowRange = relSubRow:relSubRow+split_size-1;
+                    colRange = relSubCol:relSubCol+split_size-1;
+                    sub_predicted(rowRange, colRange) = sub_pred;
+                    sub_encoded_blocks{idx} = sub_encoded;
+
+                    % Update temporary previous MV
+                    temp_prev_mv = sub_mv;
+                    temp_prev_ref_idx = sub_ref_idx;
+                end
+
+                % Add split flag cost
+                J_split = J_split + lambda * strlength(A1_Q4_expGolombEncode(1));
+                J_ns = J_ns + lambda * strlength(A1_Q4_expGolombEncode(0));
+               
+                % Choose between split and non-split based on RD cost
+                if J_split < J_ns
+                    % Use split blocks
+                    fprintf(Diff_stream, '%s %s\n', A1_Q4_expGolombEncode(1), A1_Q4_expGolombEncode(0)); % Split=1, P-frame=0
+                    
+                    % Process each sub-block
+                    for idx = 1:4
+                        diff_mv = sub_mvs(idx, :) - previous_mv;
+                        previous_mv = sub_mvs(idx, :);
+                        relSubRow = relative_offsets(idx, 1) + 1;
+                        relSubCol = relative_offsets(idx, 2) + 1;
+
+                        diff_ref_index = sub_ref_idxs(idx, :) - previous_ref_index;
+                        previous_ref_index = sub_ref_idxs(idx, :);
+
+                        fprintf(Diff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)), A1_Q4_expGolombEncode(diff_ref_index));
+                        fprintf(QTC_stream, '%s\n', sub_encoded_blocks{idx});
+                        
+                        % Update reconstructed frame for this sub-block
+                        absSubRow = row + relative_offsets(idx, 1);
+                        absSubCol = col + relative_offsets(idx, 2);
+                        
+                        % Reconstruct sub-block
+                        sub_decoded = A1_Q4_expGolombDecode(sub_encoded_blocks{idx});
+                        sub_decoded = A1_Q4_rleDecode(sub_decoded, split_size);
+                        sub_decoded = A1_Q4_inverseSScan(sub_decoded, split_size, split_size);
+                        sub_residual = A1_Q4_idctAfterDequantizeBlock(sub_decoded, A1_Q4_generateQMatrix(split_size, QP));
+                        
+                        sub_recon = sub_predicted(relSubRow:relSubRow+split_size-1, relSubCol:relSubCol+split_size-1) + sub_residual;
+                        sub_recon = max(min(sub_recon, 255), 0);
+                        
+                        reconstructedFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1) = sub_recon;
+                        predictedFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1) = sub_predicted(relSubRow:relSubRow+split_size-1, relSubCol:relSubCol+split_size-1);
+                    end
+                else
+                    % Use non-split block
+                    diff_mv = bestMatch_ns - previous_mv;
+                    previous_mv = bestMatch_ns;
+
+                    diff_ref_index = best_ref_index_ns - previous_ref_index;
+                    previous_ref_index = best_ref_index_ns;
+                    
+                    fprintf(Diff_stream, '%s %s %s %s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(0), ...
+                    A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)), A1_Q4_expGolombEncode(diff_ref_index));
+                    fprintf(QTC_stream, '%s\n', encoded_block_ns);
+                    
+                    % Reconstruct block
+                    decoded = A1_Q4_expGolombDecode(encoded_block_ns);
+                    decoded = A1_Q4_rleDecode(decoded, blockSize);
+                    decoded = A1_Q4_inverseSScan(decoded, blockSize, blockSize);
+                    residual = A2_idctAfterDequantizeBlock(decoded, Q_Matrix);
+                    
+                    reconstructed = predictedBlock_ns + residual;
+                    reconstructed = max(min(reconstructed, 255), 0);
+                    
+                    reconstructedFrame(row:row+block_height-1, col:col+block_width-1) = reconstructed;
+                    predictedFrame(row:row+block_height-1, col:col+block_width-1) = predictedBlock_ns;
+                end
             else
-                diff_mv = best_mv - previous_mv;
-                previous_mv = best_mv;
-                % generate MDiff with MV
-                fprintf(MDiff_stream, '%s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                    A1_Q4_expGolombEncode(diff_mv(1)), ...
-                    A1_Q4_expGolombEncode(diff_mv(2)));
+                % Non-VBS path
+                % find the best match mv and predicted block
+                [bestmatch_frame, predictedBlock, best_ref_index] = A2_interPredictForPBlock(referenceFrame, currentBlock, row, col, ...
+                    searchRange, blockSize, paddedWidth, paddedHeight, ...
+                    nRefFrames, FMEEnable, FastME, mvp);
+
+                diff_ref_index = best_ref_index - previous_ref_index;
+                previous_ref_index = best_ref_index;
+
+                % update the motion vector differentiation
+                if FastME
+                    mvp = bestmatch_frame;
+                    mvp_diff = mvp - previous_mvp;
+                    previous_mvp = mvp;
+                    fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
+                        A1_Q4_expGolombEncode(mvp_diff(1)), ...
+                        A1_Q4_expGolombEncode(mvp_diff(2)), ...
+                        A1_Q4_expGolombEncode(diff_ref_index));
+                else
+                    diff_mv = bestMatch_frame - previous_mv;
+                    previous_mv = bestMatch_frame;
+                    % generate MDiff with MV
+                    fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
+                        A1_Q4_expGolombEncode(diff_mv(1)), ...
+                        A1_Q4_expGolombEncode(diff_mv(2)), ...
+                        A1_Q4_expGolombEncode(diff_ref_index));
+                end
+  
+                % Update predicted frame for next iteration
+                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
+                
+                % find Residual block
+                residualBlock = A1_Q3_calcResidual(predictedBlock, currentBlock, n);
+                [~, encoded_block] = A2_Q2_computeRD(residualBlock, 0, QP, lambda);
+                fprintf(QTC_stream, '%s\n', encoded_block);
+
+                % Reconstruct block
+                decoded_block = A1_Q4_expGolombDecode(encoded_block);
+                decoded_block = A1_Q4_rleDecode(decoded_block, blockSize);
+                decoded_block = A1_Q4_inverseSScan(decoded_block, blockSize, blockSize);
+                decoded_residual = A2_idctAfterDequantizeBlock(decoded_block, Q_Matrix);
+
+                % Reconstruct block and update the reconstructed frame
+                reconstructedBlock = double(predictedBlock) + decoded_residual;
+                reconstructedBlock = max(min(reconstructedBlock, 255), 0);
+                reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock;
+
+                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
+
+                if MRFoverlay == 1
+                    overlayColor = colors(best_ref_index, :);
+                    for channel = 1:3
+                        overlayFrame(row:row+blockSize-1, col:col+blockSize-1, channel) = ...
+                            (0.5 * reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1)) + ...
+                            (0.5 * overlayColor(channel)); % Alpha blending (50%)
+                    end
+                end
             end
-            % Save the motion vector
-            % fprintf(mvFile, 'Frame %d, Block (%d, %d): MV = (%d, %d)\n', frameIdx, row, col, best_mv(1), best_mv(2));
-            
-            % find Residual block
-            residualBlock = uint16(currentBlock) - uint16(predictedBlock);
-
-            % encode the residual block
-            encoded_residual_block = A2_Q34_quantizeBlockAfterDCT(residualBlock, Q_Matrix);
-            % generate QTC stream
-            scanned_coeffs = A1_Q4_sScan(encoded_residual_block);
-            rle_encoded = A1_Q4_rleEncode(scanned_coeffs, blockSize);
-            % QTC_stream = [QTC_stream, A1_Q4_expGolombEncode(rle_encoded)];
-            encoded_value = A1_Q4_expGolombEncode(rle_encoded);
-            fprintf(QTC_stream, '%s\n', encoded_value);   % each line is a block
-
-            decoded_residual_block = A2_Q34_idctAfterDequantizeBlock(encoded_residual_block, Q_Matrix);
-
-            % Reconstruct block and update the reconstructed frame
-            reconstructedBlock = double(predictedBlock) + decoded_residual_block;
-            reconstructedBlock = max(min(reconstructedBlock, 255), 0);
-            reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock;
         end
     end
-end
 
-function [bestMatch, bestPredictedBlock] = InterPredictBLK(referenceFrame, currentBlock, row, col, ...
-    searchRange, blockSize, paddedWidth, paddedHeight, ...
-    FMEEnable, FastME, mvp)
+    if MRFoverlay == 1
+        % Clamp overlay frame values to valid range [0, 255]
+        overlayFrame = uint8(max(min(overlayFrame, 255), 0));
 
-    bestMAE = inf;
-    bestMatch = [0, 0];
-    bestPredictedBlock = zeros(blockSize, blockSize, 'uint8');
+        % Display the overlay frame
+        % imshow(overlayFrame);
 
-    if FastME
-        candidates = [
-            mvp,
-            mvp + [0, 1],
-            mvp + [0, -1],
-            mvp + [1, 0],
-            mvp + [-1, 0]
-        ];
-    else
-        [dy, dx] = meshgrid(-searchRange: searchRange, -searchRange: searchRange);
-        candidates = [dy(:), dx(:)];
-    end
-
-    % Full search within search range
-    for i = 1:size(candidates, 1)
-        mv = candidates(i, :);
-        refRow = row + mv(1);
-        refCol = col + mv(2);
-
-        if refRow < 1 || refCol < 1 || refRow+blockSize-1 > paddedHeight || refCol+blockSize-1 > paddedWidth
-            continue;
+        outputFolder = 'output_frames';  % Directory to save the images
+        % Create output folder if it doesn't exist
+        if ~exist(outputFolder, 'dir')
+            mkdir(outputFolder);
         end
-
-        % Reference block
-        referenceBlock = referenceFrame(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
-
-        if FMEEnable
-            referenceBlock = PerformInterpolation(referenceFrame, mv, refRow, refCol, blockSize);
-        end
-        mae = mean(abs(double(currentBlock(:)) - double(referenceBlock(:))));
-
-        % Update best match based on MAE and motion vector criteria
-        if mae < bestMAE || ...
-           (mae == bestMAE && abs(mv(2)) + abs(mv(1)) < abs(bestMatch(1)) + abs(bestMatch(2))) || ...
-           (mae == bestMAE && abs(mv(2)) + abs(mv(1)) == abs(bestMatch(1)) + abs(bestMatch(2)) && ...
-           (mv(1) < bestMatch(2) || (mv(1) == bestMatch(2) && mv(2) < bestMatch(1))))
-            bestMAE = mae;
-            bestMatch = mv;
-            bestPredictedBlock = referenceBlock;
-        end
-    end
-end
-
-
-function [interpolatedBlock] = PerformInterpolation(refFrame, mv, row, col, blockSize)
-    int_dy = floor(mv(1) / 2); % Integer vertical motion
-    int_dx = floor(mv(2) / 2); % Integer horizontal motion
-    frac_dy = mod(mv(1), 2) / 2; % Fractional vertical motion (0 or 0.5)
-    frac_dx = mod(mv(2), 2) / 2; % Fractional horizontal motion (0 or 0.5)
-
-    % Perform interpolation for fractional motion estimation.
-    interpolatedBlock = zeros(blockSize, blockSize, 'uint8');
-
-    [ref_height, ref_width] = size(refFrame);
-
-    row = row + int_dy;
-    col = col + int_dx;
-
-    for r = 1:blockSize
-        for c = 1:blockSize
-            % Get fractional pixel location
-            y = row + r - 1;
-            x = col + c - 1;
-
-            top_left_y = max(1, min(y, ref_height));
-            top_left_x = max(1, min(x, ref_width));
-            top_right_x = max(1, min(x + 1, ref_width));
-            bottom_left_y = max(1, min(y + 1, ref_height));
-            bottom_right_y = max(1, min(y + 1, ref_height));
-            bottom_right_x = max(1, min(x + 1, ref_width));
+        
+        % Save the overlay image as a PNG file
+        outputFileName = fullfile(outputFolder, sprintf('frame_overlay_%03d.png', frameIdx));
+        imwrite(overlayFrame, outputFileName);
     
-            top_left = refFrame(top_left_y, top_left_x);
-            top_right = refFrame(top_left_y, top_right_x);
-            bottom_left = refFrame(bottom_left_y, top_left_x);
-            bottom_right = refFrame(bottom_right_y, bottom_right_x);
-
-            % Direct reference pixel (MV = [0, 0])
-            if frac_dx == 0 && frac_dy == 0
-                interpolatedBlock(r, c) = top_left;
-
-            % Horizontal interpolation (MV = [0, 1])
-            elseif frac_dy == 0 && frac_dx ~= 0
-                interpolatedBlock(r, c) = uint8(top_left * (1 - frac_dx) + top_right * frac_dx);
-
-            % Vertical interpolation (MV = [1, 0])
-            elseif frac_dy ~= 0 && frac_dx == 0
-                interpolatedBlock(r, c) = uint8(top_left * (1 - frac_dy) + bottom_left * frac_dy);
-
-            % Diagonal interpolation (MV = [1, 1])
-            else
-                top_interp = top_left * (1 - frac_dx) + top_right * frac_dx;
-                bottom_interp = bottom_left * (1 - frac_dx) + bottom_right * frac_dx;
-                interpolatedBlock(r, c) = uint8(top_interp * (1 - frac_dy) + bottom_interp * frac_dy);
-            end
-        end
+        %fprintf('Saved overlay frame %d as %s\n', frameIdx, outputFileName);
     end
-
 end

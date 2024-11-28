@@ -1,11 +1,11 @@
-function decodedFrame = A2_Q2_decodeSplitBlock(referenceFrame, decodedFrame, QTC_Coeff_file, MDiff_file, ...
+function decodedFrame = A2_decodeSplitBlock(referenceFrame, decodedFrame, QTC_Coeff_file, MDiff_file, ...
                                                      row, col, blockSize, paddedHeight, paddedWidth, QP, I_frame_flag)
     % Calculate the size of the split sub-block
     splitSize = blockSize / 2;
 
     % Define relative offsets for Z-order traversal within the parent block
     relative_offsets = [0, 0; 0, splitSize; splitSize, 0; splitSize, splitSize];
-    Q_Matrix = A2_Q2_generateQMatrix(splitSize, QP); % Pre-compute Q matrix for sub-blocks
+    Q_Matrix = A2_generateQMatrix(splitSize, QP); % Pre-compute Q matrix for sub-blocks
 
     for idx = 1:4
         relSubRow = relative_offsets(idx, 1) + 1; % +1 for MATLAB indexing

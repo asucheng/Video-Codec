@@ -1,6 +1,6 @@
-function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, paddedHeight, ...
-    blockSize, height, width, searchRange, n, ...
-    I_period, QP_values, nRefFrames, MRFoverlay, VBSenable, FMEEnable, FastME)
+function [psnrValues] = Encoding(filename_prefix, nframes, paddedWidth, paddedHeight, ...
+    blockSize, height, width, searchRange, n, I_period, QP_values, ...
+    nRefFrames, VBSEnable, MRFoverlay, FMEEnable, FastME)
 
     % Open video files
     vid_out_Y_pad = fopen('y_only_padded.yuv', 'r');
@@ -12,7 +12,6 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
     MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
     
     psnrValues = zeros(1, nframes); % Store PSNR for each frame
-    referenceFrame = 128 * ones(paddedHeight, paddedWidth, 'uint8'); % Initial reference frame
 
     % Loop through frames
     for frameIdx = 1:nframes
@@ -20,21 +19,20 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
 
         if mod(frameIdx - 1, I_period) == 0
             fprintf('Processing I-frame %d\n', frameIdx);
-            [predictedFrame, reconstructedFrame] = A2_intraPredictForIFrame(currentFrame, blockSize, QP_values, ...
-                MDiff_stream, MVPDiff_stream, QTC_stream, VBSenable, FMEEnable, FastME); 
-            type = 'I';
+            [predictedFrame, reconstructedFrame] = A2_intraPredictForIFrame(currentFrame, blockSize, ...
+                QP_values, MDiff_stream, MVPDiff_stream, QTC_stream, ...
+                VBSEnable, FMEEnable, FastME); 
             % Clear the reference frames on I-frame
             reference_frames = [];
         else
             fprintf('Processing P-frame %d\n', frameIdx);
             % FMEEnable only works for P Frame
-            [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referenceFrame, currentFrame, searchRange, ...
+            [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(reference_frames, currentFrame, searchRange, ...
                 blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, MVPDiff_stream, QTC_stream, ...
-                VBSEnable, nRefFrames, MRFoverlay, frameIdx, FMEEnable, FastME);
-            type = 'P';
+                nRefFrames, frameIdx, VBSEnable, MRFoverlay, FMEEnable, FastME);
         end
 
-        reference_frames = A2_Q1_updateFIFObuffer(reference_frames, nRefFrames, reconstructedFrame); % Update reference frame
+        reference_frames = A2_updateFIFObuffer(reference_frames, nRefFrames, reconstructedFrame); % Update reference frame
 
         % Save predicted and reconstructed frames
         unpaddedPredictedFrame = predictedFrame(1:height, 1:width);
@@ -53,4 +51,5 @@ function [psnrValues] = A1_Q3_encoding(filename_prefix, nframes, paddedWidth, pa
     fclose(predicted_vid);
     fclose(MDiff_stream);
     fclose(QTC_stream);
+    fclose(MVPDiff_stream);
 end
