@@ -4,6 +4,11 @@ function rle_encoded = A1_Q4_rleEncode(coeffs, blockSize)
     n = length(coeffs);
     i = 1;
 
+    if all(coeffs == 0)
+        rle_encoded = [n, 0]; % Encode the entire array as one run of zeros
+        return;
+    end
+
     while i <= n
         if coeffs(i) ~= 0
             j = i;

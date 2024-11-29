@@ -54,10 +54,10 @@ function psnrValues_verify = Decoding(filename_prefix, nframes, blockSize, padde
                 string = strtrim(MDiff_line);
                 MDiff_line_array = A1_Q4_expGolombDecode(MDiff_line);
 
-                disp(MDiff_line_array)
                 split_flag = MDiff_line_array(1);
                 I_frame_flag = MDiff_line_array(2);
                 fprintf(splits, '%d\n', split_flag);
+ 
                 if split_flag == 1
                     % Handle split blocks inline (logic from A2_Q2_decodeSplitBlock)
                     splitSize = blockSize / 2;
@@ -65,17 +65,6 @@ function psnrValues_verify = Decoding(filename_prefix, nframes, blockSize, padde
                     relative_offsets = [0, 0; 0, splitSize; splitSize, 0; splitSize, splitSize];
                     sub_Q_Matrix = A2_generateQMatrix(splitSize, QP); % Pre-compute Q matrix for sub-blocks
                     for idx = 1:4
-                        % Read and decode residuals
-                        QTC_Line = fgetl(QTC_Coeff_file);
-                        % if isempty(QTC_Line)
-                        %     error('Unexpected end of QTC_Coeff file');
-                        % end
-                        encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
-                        coeffs_scanned = A1_Q4_rleDecode(encoded_rle, splitSize);
-                        residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, splitSize, splitSize);
-                        residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, sub_Q_Matrix);
-                        disp(residual_block_encoded);
-
                         % Calculate absolute positions in the padded frame
                         absSubRow = row + relative_offsets(idx, 1);
                         absSubCol = col + relative_offsets(idx, 2);
@@ -136,26 +125,36 @@ function psnrValues_verify = Decoding(filename_prefix, nframes, blockSize, padde
                                 frac_dy = mod(bestMatch(2), 2) / 2;
                                 frac_dx = mod(bestMatch(1), 2) / 2;
         
-                                refRow = row + int_dy;
-                                refCol = col + int_dx;
-                                refRow = max(1, min(refRow, paddedHeight - blockSize + 1));
-                                refCol = max(1, min(refCol, paddedWidth - blockSize + 1));
+                                refRow = absSubRow + int_dy;
+                                refCol = absSubCol + int_dx;
+                                refRow = max(1, min(refRow, paddedHeight - splitSize + 1));
+                                refCol = max(1, min(refCol, paddedWidth - splitSize + 1));
         
-                                predictorBlock = performReverseInterpolation(referenceFrame_de, refRow, refCol, frac_dy, frac_dx, blockSize);
+                                predictorBlock = performReverseInterpolation(referenceFrame_de, refRow, refCol, frac_dy, frac_dx, splitSize);
                             else
                                 % Use the motion vector to get the predictor block from the reference frame
-                                refRow = row + bestMatch(2); % row + yOffset; 
-                                refCol = col + bestMatch(1); % col + xOffset;
+                                refRow = absSubRow + bestMatch(2); % row + yOffset; 
+                                refCol = absSubCol + bestMatch(1); % col + xOffset;
                                 
                                 % Check for boundary in reference frame
-                                if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
-                                    continue;  % Skip if the predictor block goes out of bounds
+                                if refRow < 1 || refCol < 1 || refRow + splitSize - 1 > paddedHeight || refCol + splitSize - 1 > paddedWidth
+                                    predictorBlock = 128 * ones(block_height, block_width); % Skip if the predictor block goes out of bounds
+                                else
+                                    predictorBlock = referenceFrame_de(refRow:refRow+block_height-1, refCol:refCol+block_width-1);
                                 end
-                                
-                                predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
                             end
                         end
                 
+                        % Read and decode residuals
+                        QTC_Line = fgetl(QTC_Coeff_file);
+                        if isempty(QTC_Line)
+                            error('Unexpected end of QTC_Coeff file');
+                        end
+                        encoded_rle = A1_Q4_expGolombDecode(QTC_Line);
+                        coeffs_scanned = A1_Q4_rleDecode(encoded_rle, splitSize);
+                        residual_block_encoded = A1_Q4_inverseSScan(coeffs_scanned, splitSize, splitSize);
+                        residualBlock_de = A1_Q4_idctAfterDequantizeBlock(residual_block_encoded, sub_Q_Matrix);
+
                         % Reconstruct the sub-block
                         reconstructedSubBlock = double(predictorBlock) + double(residualBlock_de);
                         reconstructedSubBlock = max(min(reconstructedSubBlock, 255), 0);
@@ -163,9 +162,11 @@ function psnrValues_verify = Decoding(filename_prefix, nframes, blockSize, padde
                         % Update the decoded frame directly
                         decodedFrame(absSubRow:absSubRow+block_height-1, absSubCol:absSubCol+block_width-1) = reconstructedSubBlock;
                     end
-                else      
+                else 
+                    block_height = min(blockSize, paddedHeight - row + 1);
+                    block_width = min(blockSize, paddedWidth - col + 1);
                     % Decode non-split blocks (I- or P-frame)
-                    if I_frame_flag == 0
+                    if I_frame_flag == 0 % P-frame
                         % update the ref index differentiation
                         diff_ref_index = MDiff_line_array(5);
                         best_ref_index = diff_ref_index + previous_ref_index;
@@ -196,16 +197,13 @@ function psnrValues_verify = Decoding(filename_prefix, nframes, blockSize, padde
                             
                             % Check for boundary in reference frame
                             if refRow < 1 || refCol < 1 || refRow + blockSize - 1 > paddedHeight || refCol + blockSize - 1 > paddedWidth
-                                continue;  % Skip if the predictor block goes out of bounds
+                                predictorBlock = 128 * ones(block_height, block_width);
+                            else
+                                predictorBlock = referenceFrame_de(refRow:refRow+block_height-1, refCol:refCol+block_width-1);
                             end
-                            
-                            predictorBlock = referenceFrame_de(refRow:refRow+blockSize-1, refCol:refCol+blockSize-1);
                         end
                     else
                         % I-frame: Intra-prediction mode
-                        block_height = min(blockSize, paddedHeight - row + 1);
-                        block_width = min(blockSize, paddedWidth - col + 1);
-
                         % Extract mode difference and compute the mode
                         diff_mode = MDiff_line_array(1);
                         mode = diff_mode + previous_mode;

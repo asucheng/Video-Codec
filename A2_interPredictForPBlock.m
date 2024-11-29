@@ -3,26 +3,21 @@ function [bestMatch_frame, best_predictedBlk, best_ref_index] = A2_interPredictF
     nRefFrames, FMEEnable, FastME, mvp)
 
     % MRF parameter for frame
-    bestMAE_frame = inf;
+    bestMAE_frame = Inf;
     best_ref_index = 1;
     num_ava_refs = min(length(reference_frames), nRefFrames);
     bestMatch_frame = [0, 0];
 
     % parameter for block
-    bestMAE = inf;
+    bestMAE = Inf;
     bestMatch = [0, 0];
-    bestPredictedBlock = zeros(blockSize, blockSize, 'uint8');
 
     for ref_idx = 1:num_ava_refs
         referenceFrame = reference_frames{ref_idx};
 
         if FastME
             candidates = [
-                mvp,
-                mvp + [0, 1],
-                mvp + [0, -1],
-                mvp + [1, 0],
-                mvp + [-1, 0]
+                mvp; mvp + [0, 1]; mvp + [0, -1]; mvp + [1, 0]; mvp + [-1, 0]
             ];
         else
             [dy, dx] = meshgrid(-searchRange: searchRange, -searchRange: searchRange);

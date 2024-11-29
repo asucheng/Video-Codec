@@ -7,11 +7,10 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
     reconstructedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
  
     Q_Matrix = A2_generateQMatrix(blockSize, QP);
-    lambda = A2_Q2_getLambda(QP);
+    lambda = A2_getLambda(QP);
 
     previous_mv = [0, 0];
-    previous_mvp = [0, 0];
-    mvp = [0, 0];
+    mv = [0, 0];
 
     % determine which stream to store results
     if FastME
@@ -48,10 +47,11 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
             if VBSEnable
                 % Calculate costs for non-split case
                 [bestMatch_ns, predictedBlock_ns, best_ref_index_ns] = A2_interPredictForPBlock(reference_frames, ...
-                    currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, nRefFrames);
+                    currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, ...
+                    nRefFrames, FMEEnable, FastME, mv);
 
                 residualBlock_ns = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
-                [J_ns, encoded_block_ns] = A2_Q2_computeRD(residualBlock_ns, 0, QP, lambda);
+                [J_ns, encoded_block_ns] = A2_computeRD(residualBlock_ns, 0, QP, lambda);
 
                 diff_ref_index_ns = best_ref_index_ns - previous_ref_index;
 
@@ -81,9 +81,10 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
 
                     sub_block = currentFrame(absSubRow:absSubRow+split_size-1, absSubCol:absSubCol+split_size-1);
                     [sub_mv, sub_pred, sub_ref_idx] = A2_interPredictForPBlock(reference_frames, ...
-                        sub_block, absSubRow, absSubCol, searchRange, split_size, paddedWidth, paddedHeight, nRefFrames);
+                        sub_block, absSubRow, absSubCol, searchRange, split_size, paddedWidth, paddedHeight, ...
+                        nRefFrames, FMEEnable, FastME, mv);
                     sub_residual = A1_Q3_calcResidual(sub_pred, sub_block, n);
-                    [sub_J, sub_encoded] = A2_Q2_computeRD(sub_residual, 0, QP, lambda);
+                    [sub_J, sub_encoded] = A2_computeRD(sub_residual, 0, QP, lambda);
  
                     % Add MV cost
                     diff_sub_ref_idx = sub_ref_idx - temp_prev_ref_idx;
@@ -159,9 +160,9 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
                     decoded = A1_Q4_expGolombDecode(encoded_block_ns);
                     decoded = A1_Q4_rleDecode(decoded, blockSize);
                     decoded = A1_Q4_inverseSScan(decoded, blockSize, blockSize);
-                    residual = A2_idctAfterDequantizeBlock(decoded, Q_Matrix);
-                    
-                    reconstructed = predictedBlock_ns + residual;
+                    residual = A1_Q4_idctAfterDequantizeBlock(decoded, Q_Matrix);
+
+                    reconstructed = int8(predictedBlock_ns) + int8(residual);
                     reconstructed = max(min(reconstructed, 255), 0);
                     
                     reconstructedFrame(row:row+block_height-1, col:col+block_width-1) = reconstructed;
@@ -172,36 +173,26 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
                 % find the best match mv and predicted block
                 [bestmatch_frame, predictedBlock, best_ref_index] = A2_interPredictForPBlock(referenceFrame, currentBlock, row, col, ...
                     searchRange, blockSize, paddedWidth, paddedHeight, ...
-                    nRefFrames, FMEEnable, FastME, mvp);
+                    nRefFrames, FMEEnable, FastME, mv);
 
                 diff_ref_index = best_ref_index - previous_ref_index;
                 previous_ref_index = best_ref_index;
 
                 % update the motion vector differentiation
-                if FastME
-                    mvp = bestmatch_frame;
-                    mvp_diff = mvp - previous_mvp;
-                    previous_mvp = mvp;
-                    fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                        A1_Q4_expGolombEncode(mvp_diff(1)), ...
-                        A1_Q4_expGolombEncode(mvp_diff(2)), ...
-                        A1_Q4_expGolombEncode(diff_ref_index));
-                else
-                    diff_mv = bestMatch_frame - previous_mv;
-                    previous_mv = bestMatch_frame;
-                    % generate MDiff with MV
-                    fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
+                diff_mv = bestmatch_frame - previous_mv;
+                previous_mv = bestmatch_frame;
+                fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
                         A1_Q4_expGolombEncode(diff_mv(1)), ...
                         A1_Q4_expGolombEncode(diff_mv(2)), ...
                         A1_Q4_expGolombEncode(diff_ref_index));
-                end
+               
   
                 % Update predicted frame for next iteration
                 predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
                 
                 % find Residual block
                 residualBlock = A1_Q3_calcResidual(predictedBlock, currentBlock, n);
-                [~, encoded_block] = A2_Q2_computeRD(residualBlock, 0, QP, lambda);
+                [~, encoded_block] = A2_computeRD(residualBlock, 0, QP, lambda);
                 fprintf(QTC_stream, '%s\n', encoded_block);
 
                 % Reconstruct block
