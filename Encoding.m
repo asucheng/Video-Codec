@@ -12,7 +12,6 @@ function [psnrValues] = Encoding(filename_prefix, nframes, paddedWidth, paddedHe
     MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
     
     psnrValues = zeros(1, nframes); % Store PSNR for each frame
-
     % Loop through frames
     for frameIdx = 1:nframes
         currentFrame = fread(vid_out_Y_pad, [paddedWidth, paddedHeight], 'uint8')';

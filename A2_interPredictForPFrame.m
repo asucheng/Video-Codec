@@ -43,12 +43,14 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
 
             % Current block
             currentBlock = currentFrame(row:row+block_height-1, col:col+block_width-1);
-            
-            if VBSEnable
-                % Calculate costs for non-split case
-                [bestMatch_ns, predictedBlock_ns, best_ref_index_ns] = A2_interPredictForPBlock(reference_frames, ...
+            [bestMatch_ns, predictedBlock_ns, best_ref_index_ns] = A2_interPredictForPBlock(reference_frames, ...
                     currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, ...
                     nRefFrames, FMEEnable, FastME, mv);
+            if VBSEnable
+                % Calculate costs for non-split case
+                % [bestMatch_ns, predictedBlock_ns, best_ref_index_ns] = A2_interPredictForPBlock(reference_frames, ...
+                %     currentBlock, row, col, searchRange, blockSize, paddedWidth, paddedHeight, ...
+                %     nRefFrames, FMEEnable, FastME, mv);
 
                 residualBlock_ns = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
                 [J_ns, encoded_block_ns] = A2_computeRD(residualBlock_ns, 0, QP, lambda);
@@ -146,70 +148,94 @@ function [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(referen
                     end
                 else
                     % Use non-split block
+                    % Update motion vector differentiation
                     diff_mv = bestMatch_ns - previous_mv;
                     previous_mv = bestMatch_ns;
-
+                    
                     diff_ref_index = best_ref_index_ns - previous_ref_index;
                     previous_ref_index = best_ref_index_ns;
                     
-                    fprintf(Diff_stream, '%s %s %s %s %s\n', A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(0), ...
-                    A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)), A1_Q4_expGolombEncode(diff_ref_index));
+                    % Write motion vector and reference index differences to stream
+                    fprintf(Diff_stream, '%s %s %s %s %s\n', ...
+                        A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(0), ...
+                        A1_Q4_expGolombEncode(diff_mv(1)), A1_Q4_expGolombEncode(diff_mv(2)), ...
+                        A1_Q4_expGolombEncode(diff_ref_index));
+                    
+                    % Compute residual block
+                    residualBlock_ns = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
+                    
+                    % Encode residual block
+                    [~, encoded_block_ns] = A2_computeRD(residualBlock_ns, 0, QP, lambda);
                     fprintf(QTC_stream, '%s\n', encoded_block_ns);
                     
-                    % Reconstruct block
-                    decoded = A1_Q4_expGolombDecode(encoded_block_ns);
-                    decoded = A1_Q4_rleDecode(decoded, blockSize);
-                    decoded = A1_Q4_inverseSScan(decoded, blockSize, blockSize);
-                    residual = A1_Q4_idctAfterDequantizeBlock(decoded, Q_Matrix);
-
-                    reconstructed = int8(predictedBlock_ns) + int8(residual);
-                    reconstructed = max(min(reconstructed, 255), 0);
+                    % Decode residual block
+                    decoded_block_ns = A1_Q4_expGolombDecode(encoded_block_ns);
+                    decoded_block_ns = A1_Q4_rleDecode(decoded_block_ns, blockSize);
+                    decoded_block_ns = A1_Q4_inverseSScan(decoded_block_ns, blockSize, blockSize);
+                    decoded_residual_ns = A2_idctAfterDequantizeBlock(decoded_block_ns, Q_Matrix);
                     
-                    reconstructedFrame(row:row+block_height-1, col:col+block_width-1) = reconstructed;
-                    predictedFrame(row:row+block_height-1, col:col+block_width-1) = predictedBlock_ns;
+                    % Reconstruct block
+                    reconstructedBlock_ns = double(predictedBlock_ns) + decoded_residual_ns;
+                    reconstructedBlock_ns = max(min(reconstructedBlock_ns, 255), 0);
+                    
+                    % Update reconstructed frame
+                    reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock_ns;
+                    predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock_ns;
+                    
+                    % Apply overlay if MRFoverlay is enabled
+                    if MRFoverlay == 1
+                        overlayColor = colors(best_ref_index_ns, :);
+                        for channel = 1:3
+                            overlayFrame(row:row+blockSize-1, col:col+blockSize-1, channel) = ...
+                                (0.5 * reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1)) + ...
+                                (0.5 * overlayColor(channel)); % Alpha blending (50%)
+                        end
+                    end
                 end
             else
                 % Non-VBS path
                 % find the best match mv and predicted block
-                [bestmatch_frame, predictedBlock, best_ref_index] = A2_interPredictForPBlock(reference_frames, currentBlock, row, col, ...
-                    searchRange, blockSize, paddedWidth, paddedHeight, ...
-                    nRefFrames, FMEEnable, FastME, mv);
-
-                diff_ref_index = best_ref_index - previous_ref_index;
-                previous_ref_index = best_ref_index;
-
-                % update the motion vector differentiation
-                diff_mv = bestmatch_frame - previous_mv;
-                previous_mv = bestmatch_frame;
-                fprintf(Diff_stream, '%s %s %s %s\n', A1_Q4_expGolombEncode(0), ...
-                        A1_Q4_expGolombEncode(diff_mv(1)), ...
-                        A1_Q4_expGolombEncode(diff_mv(2)), ...
-                        A1_Q4_expGolombEncode(diff_ref_index));
-               
-  
-                % Update predicted frame for next iteration
-                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
+                diff_ref_index = best_ref_index_ns - previous_ref_index;
+                previous_ref_index = best_ref_index_ns;
                 
-                % find Residual block
-                residualBlock = A1_Q3_calcResidual(predictedBlock, currentBlock, n);
-                [~, encoded_block] = A2_computeRD(residualBlock, 0, QP, lambda);
-                fprintf(QTC_stream, '%s\n', encoded_block);
-
-                % Reconstruct block
-                decoded_block = A1_Q4_expGolombDecode(encoded_block);
-                decoded_block = A1_Q4_rleDecode(decoded_block, blockSize);
-                decoded_block = A1_Q4_inverseSScan(decoded_block, blockSize, blockSize);
-                decoded_residual = A2_idctAfterDequantizeBlock(decoded_block, Q_Matrix);
-
-                % Reconstruct block and update the reconstructed frame
-                reconstructedBlock = double(predictedBlock) + decoded_residual;
-                reconstructedBlock = max(min(reconstructedBlock, 255), 0);
-                reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock;
-
-                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock;
-
+                % Update motion vector differentiation
+                diff_mv = bestMatch_ns - previous_mv;
+                previous_mv = bestMatch_ns;
+                
+                % Write motion vector and reference index differences to the stream
+                fprintf(Diff_stream, '%s %s %s %s %s\n', ...
+                    A1_Q4_expGolombEncode(0), A1_Q4_expGolombEncode(0), ...
+                    A1_Q4_expGolombEncode(diff_mv(1)), ...
+                    A1_Q4_expGolombEncode(diff_mv(2)), ...
+                    A1_Q4_expGolombEncode(diff_ref_index));
+                
+                % Update predicted frame for the current block
+                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock_ns;
+                
+                % Calculate residual block
+                residualBlock = A1_Q3_calcResidual(predictedBlock_ns, currentBlock, n);
+                
+                % Encode residual block
+                [~, encoded_block_ns] = A2_computeRD(residualBlock, 0, QP, lambda);
+                fprintf(QTC_stream, '%s\n', encoded_block_ns);
+                
+                % Decode the residual block
+                decoded_block_ns = A1_Q4_expGolombDecode(encoded_block_ns);
+                decoded_block_ns = A1_Q4_rleDecode(decoded_block_ns, blockSize);
+                decoded_block_ns = A1_Q4_inverseSScan(decoded_block_ns, blockSize, blockSize);
+                decoded_residual_ns = A2_idctAfterDequantizeBlock(decoded_block_ns, Q_Matrix);
+                
+                % Reconstruct the block
+                reconstructedBlock_ns = double(predictedBlock_ns) + decoded_residual_ns;
+                reconstructedBlock_ns = max(min(reconstructedBlock_ns, 255), 0);
+                
+                % Update the reconstructed frame for the current block
+                reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1) = reconstructedBlock_ns;
+                predictedFrame(row:row+blockSize-1, col:col+blockSize-1) = predictedBlock_ns;
+                
+                % Apply overlay if enabled
                 if MRFoverlay == 1
-                    overlayColor = colors(best_ref_index, :);
+                    overlayColor = colors(best_ref_index_ns, :);
                     for channel = 1:3
                         overlayFrame(row:row+blockSize-1, col:col+blockSize-1, channel) = ...
                             (0.5 * reconstructedFrame(row:row+blockSize-1, col:col+blockSize-1)) + ...
