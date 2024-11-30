@@ -1,4 +1,4 @@
-function bitcount = Q4_bitcountFromArray(data)
+function bitcount = A1_Q4_bitcountFromArray(data)
     binary_str = '';
 
     for i = 1:length(data)

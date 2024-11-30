@@ -1,4 +1,4 @@
-function [encoded_frame, reconstructed_frame, bitstream] = Q4_interPredictForPFrame(frame, reference_frame, block_size, QP)
+function [encoded_frame, reconstructed_frame, bitstream] = A1_Q4_interPredictForPFrame(frame, reference_frame, block_size, QP)
     Q_Matrix = Q4_generateQMatrix(block_size, QP);
 
     [h, w] = size(frame);
