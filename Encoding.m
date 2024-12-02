@@ -1,4 +1,4 @@
-function [psnrValues] = Encoding(filename_prefix, nframes, paddedWidth, paddedHeight, ...
+function [psnrValues, pBitCounts, iBitCounts] = Encoding(filename_prefix, nframes, paddedWidth, paddedHeight, ...
     blockSize, height, width, searchRange, n, I_period, QP_values, ...
     nRefFrames, VBSEnable, MRFoverlay, FMEEnable, FastME)
 
@@ -12,6 +12,9 @@ function [psnrValues] = Encoding(filename_prefix, nframes, paddedWidth, paddedHe
     MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
     
     psnrValues = zeros(1, nframes); % Store PSNR for each frame
+    pBitCounts = 0;
+    iBitCounts = 0;
+ 
     % Loop through frames
     for frameIdx = 1:nframes
         currentFrame = fread(vid_out_Y_pad, [paddedWidth, paddedHeight], 'uint8')';
@@ -23,12 +26,14 @@ function [psnrValues] = Encoding(filename_prefix, nframes, paddedWidth, paddedHe
                 VBSEnable, FMEEnable, FastME); 
             % Clear the reference frames on I-frame
             reference_frames = [];
+            iBitCounts = iBitCounts + 0;
         else
             fprintf('Processing P-frame %d\n', frameIdx);
             % FMEEnable only works for P Frame
             [predictedFrame, reconstructedFrame] = A2_interPredictForPFrame(reference_frames, currentFrame, searchRange, ...
                 blockSize, paddedHeight, paddedWidth, n, QP_values, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                 nRefFrames, frameIdx, VBSEnable, MRFoverlay, FMEEnable, FastME);
+            pBitCounts = pBitCounts + 0;
         end
 
         reference_frames = A2_updateFIFObuffer(reference_frames, nRefFrames, reconstructedFrame); % Update reference frame

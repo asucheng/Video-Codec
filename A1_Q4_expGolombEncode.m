@@ -3,7 +3,7 @@ function encoded_bitstream = A1_Q4_expGolombEncode(value)
         encoded_bitstream = '';
         for i = 1:length(value)
             encoded_str = exp_golomb_encode_single_value(value(i));
-            encoded_bitstream = [encoded_bitstream, encoded_str, ' '];  % 用空格分隔
+            encoded_bitstream = [encoded_bitstream, encoded_str, ' ']; 
         end
     else
         encoded_bitstream = exp_golomb_encode_single_value(value);
