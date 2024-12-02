@@ -2,7 +2,7 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
     searchRange, blockSize, paddedHeight, paddedWidth, n, QP, ...
     MDiff_stream, MVPDiff_stream, QTC_stream, nRefFrames, frameIdx, ...
     VBSEnable, MRFoverlay, FMEEnable, FastME, RCflag, bitBudgetPerFrame, pFrameBudgetTable, ...
-    blockSizeCollection, QPValueCollection)
+    blockSizeCollection, QPValueCollection, QPDiff_stream)
 
     predictedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
     reconstructedFrame = zeros(paddedHeight, paddedWidth, 'uint8');
@@ -35,16 +35,24 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
     totalRowCounts = 0;
     remainingRowBlockCounts = ceil(size(currentFrame, 1) / blockSize);
     remainingBitForThisFrame = bitBudgetPerFrame;
+    previous_qp = 0;
 
     if RCflag
-        bitPerRemainingRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
-        QPValue = A3_findQPForBudget(bitPerRemainingRowBlock, blockSize, blockSizeCollection, QPValueCollection, pFrameBudgetTable);
-        
-        Q_Matrix = A3_generateQMatrix(blockSize, QPValue);
-        lambda = A3_getLambda(QPValue);
         
         for row = 1:blockSize:paddedHeight
             bitConsumedThisRowBlock = 0;
+            totalRowCounts = totalRowCounts + 1;
+
+            bitPerRemainingRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
+            QPValue = A3_findQPForBudget(bitPerRemainingRowBlock, blockSize, blockSizeCollection, QPValueCollection, pFrameBudgetTable);
+            
+            qp_diff = QPValue - previous_qp;
+            previous_qp = QPValue;
+            fprintf(QPDiff_stream, '%s\n', A1_Q4_expGolombEncode(qp_diff));
+            bitConsumedThisFrame = bitConsumedThisFrame + A3_calcBitCounts(A1_Q4_expGolombEncode(qp_diff));
+            
+            Q_Matrix = A3_generateQMatrix(blockSize, QPValue);
+            lambda = A3_getLambda(QPValue);
 
             for col = 1:blockSize:paddedWidth
                 block_height = min(blockSize, paddedHeight - row + 1);
@@ -271,16 +279,12 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
                         end
                     end
                 end
-            end
-            
+            end 
             remainingRowBlockCounts = remainingRowBlockCounts - 1;
             remainingBitForThisFrame = remainingBitForThisFrame - bitConsumedThisRowBlock;
-            bitPerRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
-            QPValue = A3_findQPForBudget(bitPerRowBlock, blockSize, blockSizeCollection, QPValueCollection, pFrameBudgetTable);
         end
 
         bitConsumedThisFrame = bitBudgetPerFrame - remainingBitForThisFrame;
-        totalRowCounts = totalRowCounts + 1;
     else
         % Loop over blocks
         for row = 1:blockSize:paddedHeight

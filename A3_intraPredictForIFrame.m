@@ -2,14 +2,16 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
     original_frame, block_size, QP, ...
     MDiff_stream, MVPDiff_stream, QTC_stream, ...
     VBSEnable, ~, FastME, RCflag, bitBudgetPerFrame, iFrameBudgetTable, ...
-    blockSizeCollection, QPValueCollection)
+    blockSizeCollection, QPValueCollection, QPDiff_stream)
 
     Q_Matrix = A3_generateQMatrix(block_size, QP);
     [h, w] = size(original_frame);
     reconstructedFrame = zeros(h, w);
     encoded_frame = zeros(h, w);
     lambda = A3_getLambda(QP);
+
     previous_mode = 0;
+    previous_qp = 0;
 
     if FastME
         Diff_stream = MVPDiff_stream;
@@ -24,11 +26,19 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
     remainingBitForThisFrame = bitBudgetPerFrame;
 
     if RCflag
-        bitPerRemainingRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
-        QPValue = A3_findQPForBudget(bitPerRemainingRowBlock, block_size, blockSizeCollection, QPValueCollection, iFrameBudgetTable);
         
         for i = 1:block_size:size(original_frame, 1)
             bitConsumedThisRowBlock = 0;
+            totalRowCounts = totalRowCounts + 1;
+
+            bitPerRemainingRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
+            QPValue = A3_findQPForBudget(bitPerRemainingRowBlock, block_size, blockSizeCollection, QPValueCollection, iFrameBudgetTable);
+            Q_Matrix = A3_generateQMatrix(block_size, QP);
+
+            qp_diff = QPValue - previous_qp;
+            previous_qp = QPValue;
+            fprintf(QPDiff_stream, '%s\n', A1_Q4_expGolombEncode(qp_diff));
+            bitConsumedThisFrame = bitConsumedThisFrame + A3_calcBitCounts(A1_Q4_expGolombEncode(qp_diff));
 
             for j = 1:block_size:size(original_frame, 2)
                 % get the real size of current block
@@ -142,12 +152,10 @@ function [predictedFrame, reconstructedFrame, bitConsumedThisFrame, totalRowCoun
 
             remainingRowBlockCounts = remainingRowBlockCounts - 1;
             remainingBitForThisFrame = remainingBitForThisFrame - bitConsumedThisRowBlock;
-            bitPerRowBlock = A3_getRowBitBudget(RCflag, remainingBitForThisFrame, remainingRowBlockCounts);
-            QPValue = A3_findQPForBudget(bitPerRowBlock, block_size, blockSizeCollection, QPValueCollection, iFrameBudgetTable);
         end
 
         bitConsumedThisFrame = bitBudgetPerFrame - remainingBitForThisFrame;
-        totalRowCounts = totalRowCounts + 1;
+
     else
         % Simulate processing the frame in blocks
         for i = 1:block_size:size(original_frame, 1)

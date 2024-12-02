@@ -12,6 +12,7 @@ function [psnrValues, frameBitUsage, rowBlockCount] = A3_Encoding(filename_prefi
     MDiff_stream = fopen(strcat(filename_prefix, 'MDiff.txt'), 'w');
     QTC_stream = fopen(strcat(filename_prefix, 'QTC_Coeff.txt'), 'w');
     MVPDiff_stream = fopen(strcat(filename_prefix, 'MVPDiff.txt'), 'w');
+    QPDiff_stream = fopen(strcat(filename_prefix, 'QPDiff.txt'), 'w');
     
     psnrValues = zeros(1, nframes); % Store PSNR for each frame
     frameBitUsage = zeros(1, nframes); % Track actual bit usage for each frame
@@ -34,23 +35,23 @@ function [psnrValues, frameBitUsage, rowBlockCount] = A3_Encoding(filename_prefi
             end
 
             if mod(frameIdx - 1, I_period) == 0
-                fprintf('Processing I-frame %d with frame budget: %.2f\n', frameIdx, budgetPerFrame);
+                % fprintf('Processing I-frame %d with frame budget: %.2f\n', frameIdx, budgetPerFrame);
                 [predictedFrame, reconstructedFrame, bitCountConsumed, rowBlockCountThisFrame] = A3_intraPredictForIFrame( ...
                     currentFrame, blockSize, QP_value, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                     VBSEnable, FMEEnable, FastME, ...
                     RCflag, budgetPerFrame, iFrameAverageBitCount, ...
-                    blockSizeCollections, QPValueCollections);
+                    blockSizeCollections, QPValueCollections, QPDiff_stream);
                     
                 % Clear the reference frames on I-frame
                 reference_frames = [];
             else
-                fprintf('Processing P-frame %d with frame budget: %.2f\n', frameIdx, budgetPerFrame);
+                % fprintf('Processing P-frame %d with frame budget: %.2f\n', frameIdx, budgetPerFrame);
                 [predictedFrame, reconstructedFrame, bitCountConsumed, rowBlockCountThisFrame] = A3_interPredictForPFrame( ...
                     reference_frames, currentFrame, searchRange, ...
                     blockSize, paddedHeight, paddedWidth, n, QP_value, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                     nRefFrames, frameIdx, VBSEnable, MRFoverlay, FMEEnable, FastME, ...
                     RCflag, budgetPerFrame, pFrameAverageBitCount, ...
-                    blockSizeCollections, QPValueCollections);
+                    blockSizeCollections, QPValueCollections, QPDiff_stream);
             end
             remainingBitBudget = remainingBitBudget - bitCountConsumed;
         else
@@ -59,7 +60,7 @@ function [psnrValues, frameBitUsage, rowBlockCount] = A3_Encoding(filename_prefi
                 [predictedFrame, reconstructedFrame, bitCountConsumed, rowBlockCountThisFrame] = A3_intraPredictForIFrame(currentFrame, blockSize, ...
                     QP_value, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                     VBSEnable, FMEEnable, FastME, false, ...
-                    inf, [], [], []);
+                    inf, [], [], [], QPDiff_stream);
     
                 % Clear the reference frames on I-frame
                 reference_frames = [];
@@ -69,7 +70,7 @@ function [psnrValues, frameBitUsage, rowBlockCount] = A3_Encoding(filename_prefi
                 [predictedFrame, reconstructedFrame, bitCountConsumed, rowBlockCountThisFrame] = A3_interPredictForPFrame(reference_frames, currentFrame, searchRange, ...
                     blockSize, paddedHeight, paddedWidth, n, QP_value, MDiff_stream, MVPDiff_stream, QTC_stream, ...
                     nRefFrames, frameIdx, VBSEnable, MRFoverlay, FMEEnable, FastME, ...
-                    false, inf, [], [], []);
+                    false, inf, [], [], [], QPDiff_stream);
             end
 
         end
@@ -97,4 +98,5 @@ function [psnrValues, frameBitUsage, rowBlockCount] = A3_Encoding(filename_prefi
     fclose(MDiff_stream);
     fclose(QTC_stream);
     fclose(MVPDiff_stream);
+    fclose(QPDiff_stream);
 end
