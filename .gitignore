@@ -1,4 +1,6 @@
 *.asv
 *.txt
 *.yuv
+
+output_frames/*
 .DS_Store
